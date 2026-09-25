@@ -1,0 +1,26 @@
+api:
+  dashboard: true
+  insecure: false
+
+entryPoints:
+  web:
+    address: ':80'
+  websecure:
+    address: ':443'
+  metrics:
+    address: ':8080'
+
+providers:
+  docker:
+    endpoint: 'tcp://docker-proxy:2375'
+    exposedByDefault: false
+    network: public_net
+
+metrics:
+  prometheus:
+    entryPoint: metrics
+
+log:
+  level: WARN
+
+accessLog: {}

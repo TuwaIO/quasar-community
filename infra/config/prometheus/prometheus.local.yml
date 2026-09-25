@@ -1,0 +1,125 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - 'rules.yml'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['prometheus:9090']
+
+  - job_name: 'traefik'
+    static_configs:
+      - targets: ['traefik:8080']
+
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['postgres-exporter-primary:9187', 'postgres-exporter-standby:9187']
+
+  - job_name: 'redis-api'
+    static_configs:
+      - targets:
+        - redis://redis-api-node-1:6379
+        - redis://redis-api-node-2:6379
+        - redis://redis-api-node-3:6379
+        - redis://redis-api-node-4:6379
+        - redis://redis-api-node-5:6379
+        - redis://redis-api-node-6:6379
+    metrics_path: /scrape
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: redis-exporter-api:9121
+
+  - job_name: 'redis-ui'
+    static_configs:
+      - targets:
+        - redis://redis-ui-node-1:6379
+        - redis://redis-ui-node-2:6379
+    metrics_path: /scrape
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: redis-exporter-ui:9121
+
+  - job_name: 'quasar-nest'
+    metrics_path: '/metrics'
+    docker_sd_configs:
+      - host: http://docker-proxy:2375
+    relabel_configs:
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        regex: 'quasar-nest-api|quasar-worker'
+        action: keep
+      - source_labels: [__meta_docker_network_name]
+        regex: 'backend_net'
+        action: keep
+      - source_labels: [__meta_docker_container_name]
+        regex: '/(.*)'
+        target_label: instance
+      - source_labels: [__meta_docker_network_ip]
+        regex: '(.+)'
+        replacement: '$1:3001'
+        target_label: __address__
+
+  - job_name: 'quasar-app'
+    metrics_path: '/api/metrics'
+    docker_sd_configs:
+      - host: http://docker-proxy:2375
+    relabel_configs:
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        regex: 'quasar-app'
+        action: keep
+      - source_labels: [__meta_docker_network_name]
+        regex: 'backend_net'
+        action: keep
+      - source_labels: [__meta_docker_container_name]
+        regex: '/(.*)'
+        target_label: instance
+      - source_labels: [__meta_docker_network_ip]
+        regex: '(.+)'
+        replacement: '$1:3000'
+        target_label: __address__
+
+  - job_name: 'pgbouncer-exporter'
+    static_configs:
+      - targets: ['pgbouncer-exporter:9127']
+
+  - job_name: 'cloudflared'
+    static_configs:
+      - targets: ['cloudflared:2000']
+
+  - job_name: 'blackbox'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+        - http://quasar-app:3000/api/health
+        labels:
+          service: 'quasar-app'
+      - targets:
+        - http://quasar-nest-api:3001/v1/engine/monitoring/health
+        labels:
+          service: 'quasar-nest-api'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+

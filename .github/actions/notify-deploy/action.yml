@@ -1,0 +1,84 @@
+name: 'Notify Deploy Status'
+description: 'Sends deployment status notifications to Discord and Telegram.'
+
+inputs:
+  status:
+    description: 'Job status: success or failure'
+    required: true
+  ref-name:
+    description: 'Git branch name'
+    required: true
+  commit-sha:
+    description: 'Full commit SHA'
+    required: true
+  repo-name:
+    description: 'GitHub repository name (owner/repo)'
+    required: true
+  actor-name:
+    description: 'GitHub actor who triggered the deploy'
+    required: true
+  discord-webhook:
+    description: 'Discord webhook URL'
+    required: false
+    default: ''
+  telegram-token:
+    description: 'Telegram bot token'
+    required: false
+    default: ''
+  telegram-to:
+    description: 'Telegram chat ID'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Send Notifications
+      shell: bash
+      env:
+        JOB_STATUS: ${{ inputs.status }}
+        REF_NAME: ${{ inputs.ref-name }}
+        COMMIT_SHA: ${{ inputs.commit-sha }}
+        REPO_NAME: ${{ inputs.repo-name }}
+        ACTOR_NAME: ${{ inputs.actor-name }}
+        DISCORD_WEBHOOK: ${{ inputs.discord-webhook }}
+        TELEGRAM_TOKEN: ${{ inputs.telegram-token }}
+        TELEGRAM_TO: ${{ inputs.telegram-to }}
+      run: |
+        if [ "$JOB_STATUS" = "success" ]; then
+          COLOR="65280"
+          EMOJI="✅"
+          TITLE="Quasar Deployment Successful"
+          DESC="Successfully deployed Quasar to **$REF_NAME** environment."
+        else
+          COLOR="16711680"
+          EMOJI="❌"
+          TITLE="Quasar Deployment Failed"
+          DESC="Failed to deploy Quasar to **$REF_NAME** environment."
+        fi
+
+        if [ -n "$DISCORD_WEBHOOK" ]; then
+          echo "Sending Discord notification..."
+          curl -H "Content-Type: application/json" \
+               -d '{
+                 "embeds": [{
+                   "title": "'"$EMOJI $TITLE"'",
+                   "description": "'"$DESC"'",
+                   "color": '"$COLOR"',
+                   "fields": [
+                     {"name": "Commit", "value": "['"$COMMIT_SHA"'](https://github.com/'"$REPO_NAME"'/commit/'"$COMMIT_SHA"')", "inline": true},
+                     {"name": "Branch", "value": "`'"$REF_NAME"'`", "inline": true},
+                     {"name": "Actor", "value": "'"$ACTOR_NAME"'", "inline": true}
+                   ]
+                 }]
+               }' "$DISCORD_WEBHOOK"
+        fi
+
+        if [ -n "$TELEGRAM_TOKEN" ] && [ -n "$TELEGRAM_TO" ]; then
+          echo "Sending Telegram notification..."
+          MESSAGE="$EMOJI *$TITLE*%0A%0A*Ref*: \`$REF_NAME\`%0A*Commit*: [$COMMIT_SHA](https://github.com/$REPO_NAME/commit/$COMMIT_SHA)%0A*Actor*: $ACTOR_NAME"
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
+            -d "chat_id=$TELEGRAM_TO" \
+            -d "text=$MESSAGE" \
+            -d "parse_mode=Markdown"
+        fi

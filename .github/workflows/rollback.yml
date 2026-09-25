@@ -1,0 +1,249 @@
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to roll back'
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+      image_tag:
+        description: 'Full 40-character release commit SHA to roll back to'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  rollback:
+    name: Rollback ${{ inputs.environment }} to ${{ inputs.image_tag }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.environment == 'production' && 'production-deploy' || 'staging-deploy' }}
+    steps:
+      - name: Prepare Repo Name
+        id: repo
+        run: |
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_OUTPUT
+          # Must match the base deploy.yml pushes to, and for the same reason:
+          # GHCR packages belong to the owner, so each copy of this repository
+          # needs its own package name. See deploy.yml, "Prepare Repo Name".
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+          echo "image_base=${REPO_NAME,,}" >> $GITHUB_OUTPUT
+
+      - name: Validate Image Tag
+        env:
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          if [[ ! "$INPUT_IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "ERROR: Rollback requires the full 40-character release commit SHA."
+            exit 1
+          fi
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v2.4.3
+
+      - name: Log in to GHCR for signature verification
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Resolve and verify signed rollback images
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          OWNER: ${{ steps.repo.outputs.owner }}
+          IMAGE_BASE: ${{ steps.repo.outputs.image_base }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          CERTIFICATE_IDENTITY_REGEXP="^https://github.com/${REPOSITORY}/.github/workflows/deploy.yml@refs/heads/(main|staging)$"
+          for suffix in app nest migrate; do
+            component="${IMAGE_BASE}-${suffix}"
+            tagged_image="ghcr.io/${OWNER}/${component}:${IMAGE_TAG}"
+            docker pull "$tagged_image"
+            digest_image=$(docker image inspect "$tagged_image" --format '{{index .RepoDigests 0}}')
+            case "$digest_image" in
+              ghcr.io/*@sha256:*) ;;
+              *) echo "ERROR: ${tagged_image} did not resolve to a registry digest."; exit 1 ;;
+            esac
+            cosign verify \
+              --certificate-identity-regexp "$CERTIFICATE_IDENTITY_REGEXP" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              -a git_sha="$IMAGE_TAG" \
+              -a repository="$REPOSITORY" \
+              "$digest_image" >/dev/null
+            case "$suffix" in
+              app) echo "app_image=${digest_image}" >> "$GITHUB_OUTPUT" ;;
+              nest) echo "nest_image=${digest_image}" >> "$GITHUB_OUTPUT" ;;
+              migrate) echo "migrate_image=${digest_image}" >> "$GITHUB_OUTPUT" ;;
+            esac
+          done
+
+      - name: Rollback via SSH
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
+        env:
+          ENV_SUFFIX: ${{ inputs.environment == 'production' && 'prod' || 'stg' }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
+          REPO_OWNER: ${{ steps.repo.outputs.owner }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          ACTOR: ${{ github.actor }}
+          QUASAR_APP_IMAGE: ${{ steps.release.outputs.app_image }}
+          QUASAR_NEST_IMAGE: ${{ steps.release.outputs.nest_image }}
+          QUASAR_MIGRATE_IMAGE: ${{ steps.release.outputs.migrate_image }}
+        with:
+          host: ${{ inputs.environment == 'production' && secrets.PROD_SSH_HOST || secrets.STAGING_SSH_HOST }}
+          username: ${{ inputs.environment == 'production' && secrets.PROD_SSH_USER || secrets.STAGING_SSH_USER }}
+          key: ${{ inputs.environment == 'production' && secrets.PROD_SSH_KEY || secrets.STAGING_SSH_KEY }}
+          fingerprint: ${{ inputs.environment == 'production' && secrets.PROD_SSH_FINGERPRINT || secrets.STAGING_SSH_FINGERPRINT }}
+          debug: false
+          envs: ENV_SUFFIX,IMAGE_TAG,PROJECT_PATH,REPO_OWNER,GHCR_PAT,ACTOR,QUASAR_APP_IMAGE,QUASAR_NEST_IMAGE,QUASAR_MIGRATE_IMAGE
+          script: |
+            cd "$PROJECT_PATH" || { echo "Project path not found"; exit 1; }
+
+            echo "Synchronizing repository working tree to target release commit $IMAGE_TAG..."
+            git fetch --no-tags origin "$IMAGE_TAG" || git fetch origin
+            git checkout --detach "$IMAGE_TAG" || { echo "ERROR: Failed to checkout release commit $IMAGE_TAG"; exit 1; }
+
+            echo "$GHCR_PAT" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
+            # Pull immutable references resolved and signature-verified in CI.
+            docker pull "$QUASAR_APP_IMAGE"
+            docker pull "$QUASAR_NEST_IMAGE"
+            docker pull "$QUASAR_MIGRATE_IMAGE"
+
+            # Validate rollback safety from the release manifest
+            echo "Validating rollback safety from target image release-manifest.json..."
+            TARGET_MANIFEST=$(docker run --rm "$QUASAR_APP_IMAGE" cat release-manifest.json 2>/dev/null || echo "")
+            CURRENT_CONTAINER=$(docker ps --filter "label=com.docker.compose.project=quasar" --filter "label=com.docker.compose.service=quasar-app" --format "{{.Names}}" | head -n 1 || true)
+            CURRENT_MANIFEST=""
+            if [ -n "$CURRENT_CONTAINER" ]; then
+              CURRENT_MANIFEST=$(docker exec -T "$CURRENT_CONTAINER" cat release-manifest.json 2>/dev/null || echo "")
+            fi
+
+            echo "Current manifest: $CURRENT_MANIFEST"
+            echo "Target manifest: $TARGET_MANIFEST"
+
+            if [ -z "$TARGET_MANIFEST" ]; then
+              echo "ERROR: Target image $IMAGE_TAG is missing release-manifest.json. Fail closed."
+              exit 1
+            fi
+
+            if ! echo "$TARGET_MANIFEST" | grep -q '"rollback_safe":\s*true'; then
+              echo "ERROR: Target image $IMAGE_TAG is not explicitly marked as safe for rollback (rollback_safe is not true)."
+              exit 1
+            fi
+            # Auto-detect desired replica counts from docker-compose config
+            APP_REPLICAS=$(QUASAR_IMAGE_TAG=$IMAGE_TAG QUASAR_APP_IMAGE=$QUASAR_APP_IMAGE QUASAR_NEST_IMAGE=$QUASAR_NEST_IMAGE QUASAR_MIGRATE_IMAGE=$QUASAR_MIGRATE_IMAGE docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.$ENV_SUFFIX.yml \
+              config --format json | jq -r '.services."quasar-app".deploy.replicas // 2')
+            NEST_REPLICAS=$(QUASAR_IMAGE_TAG=$IMAGE_TAG QUASAR_APP_IMAGE=$QUASAR_APP_IMAGE QUASAR_NEST_IMAGE=$QUASAR_NEST_IMAGE QUASAR_MIGRATE_IMAGE=$QUASAR_MIGRATE_IMAGE docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.$ENV_SUFFIX.yml \
+              config --format json | jq -r '.services."quasar-nest-api".deploy.replicas // 2')
+            WORKER_REPLICAS=$(QUASAR_IMAGE_TAG=$IMAGE_TAG QUASAR_APP_IMAGE=$QUASAR_APP_IMAGE QUASAR_NEST_IMAGE=$QUASAR_NEST_IMAGE QUASAR_MIGRATE_IMAGE=$QUASAR_MIGRATE_IMAGE docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.$ENV_SUFFIX.yml \
+              config --format json | jq -r '.services."quasar-worker".deploy.replicas // 2')
+
+            # Rollout specified rollback image tags with compose-configured replica counts
+            QUASAR_IMAGE_TAG=$IMAGE_TAG QUASAR_APP_IMAGE=$QUASAR_APP_IMAGE QUASAR_NEST_IMAGE=$QUASAR_NEST_IMAGE QUASAR_MIGRATE_IMAGE=$QUASAR_MIGRATE_IMAGE docker compose \
+              --env-file .env \
+              -f infra/docker-compose.yml \
+              -f infra/docker-compose.$ENV_SUFFIX.yml \
+              up -d --remove-orphans --no-build --scale quasar-app=$APP_REPLICAS --scale quasar-nest-api=$NEST_REPLICAS --scale quasar-worker=$WORKER_REPLICAS
+
+            # Helper to check health of all containers of a service (2-phase approach)
+            check_service_health() {
+              local SERVICE=$1
+              local PORT=$2
+              local HEALTH_PATH=$3
+              local MAX_ATTEMPTS=30
+              local SLEEP_INTERVAL=5
+
+              # Get all container names for the service
+              local CONTAINERS=$(docker ps --filter "label=com.docker.compose.project=quasar" --filter "label=com.docker.compose.service=$SERVICE" --format "{{.Names}}" || true)
+
+              if [ -z "$CONTAINERS" ]; then
+                echo "ERROR: No containers found for service $SERVICE!"
+                return 1
+              fi
+
+              for CNAME in $CONTAINERS; do
+                echo "Verifying health of container $CNAME (max ${MAX_ATTEMPTS}x${SLEEP_INTERVAL}s)..."
+                local HEALTHY=false
+
+                # Phase 1: Wait for container to be running
+                for i in $(seq 1 10); do
+                  local CONTAINER_STATE=$(docker inspect --format='{{.State.Status}}' "$CNAME" 2>/dev/null || echo 'missing')
+                  if [ "$CONTAINER_STATE" = "running" ]; then
+                    break
+                  fi
+                  if [ "$CONTAINER_STATE" = "exited" ] || [ "$CONTAINER_STATE" = "dead" ]; then
+                    echo "ERROR: Container $CNAME is $CONTAINER_STATE!"
+                    docker logs --tail 80 "$CNAME"
+                    return 1
+                  fi
+                  sleep 3
+                done
+
+                # Phase 2: Deep health check
+                for j in $(seq 1 $MAX_ATTEMPTS); do
+                  # Primary: curl inside the container with timeout
+                  local HEALTH_RES
+                  local HTTP_CODE
+                  local HEALTH_BODY
+                  HEALTH_RES=$(docker exec -T "$CNAME" curl -s -w "\n%{http_code}" --max-time 5 "http://127.0.0.1:${PORT}${HEALTH_PATH}" 2>/dev/null || echo -e "curl_error\n000")
+                  HTTP_CODE=$(echo "$HEALTH_RES" | tail -n 1)
+                  HEALTH_BODY=$(echo "$HEALTH_RES" | sed '$d')
+
+                  if [ "$HTTP_CODE" = "200" ]; then
+                    echo "Container $CNAME is healthy (curl status 200)!"
+                    HEALTHY=true
+                    break
+                  else
+                    echo "Waiting for container $CNAME health... ($j/$MAX_ATTEMPTS, HTTP_STATUS=$HTTP_CODE, Body=$HEALTH_BODY)"
+                  fi
+                  # Fallback: Docker's own healthcheck status
+                  local STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$CNAME" 2>/dev/null || echo 'missing')
+                  if [ "$STATUS" = "healthy" ]; then
+                    echo "Container $CNAME is healthy (docker inspect)!"
+                    HEALTHY=true
+                    break
+                  fi
+                  if [ "$STATUS" = "unhealthy" ]; then
+                    echo "ERROR: Container $CNAME is unhealthy (docker inspect)!"
+                    docker logs --tail 80 "$CNAME"
+                    return 1
+                  fi
+                  sleep $SLEEP_INTERVAL
+                done
+                if [ "$HEALTHY" != "true" ]; then
+                  echo "ERROR: Container $CNAME failed health check after $((MAX_ATTEMPTS * SLEEP_INTERVAL))s!"
+                  docker logs --tail 80 "$CNAME"
+                  return 1
+                fi
+              done
+              return 0
+            }
+
+            echo "Running health checks for App (Next.js) and Engine (NestJS)..."
+            for i in $(seq 1 12); do
+              if check_service_health "quasar-app" "3000" "/api/health" && check_service_health "quasar-nest-api" "3001" "/v1/engine/monitoring/health" && check_service_health "quasar-worker" "3001" "/v1/engine/monitoring/health"; then
+                echo "All health checks passed successfully!"
+                break
+              fi
+              echo "Attempt $i/12 failed, retrying in 5s..."
+              sleep 5
+              if [ "$i" -eq 12 ]; then
+                echo "Health checks failed — rollback may have failed!"
+                exit 1
+              fi
+            done
+
+            echo "Rollback to $IMAGE_TAG completed successfully."

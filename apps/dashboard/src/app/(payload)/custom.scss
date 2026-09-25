@@ -1,0 +1,77 @@
+/* =============================================================================
+ * Payload CMS Admin — Custom Styles
+ * =============================================================================
+ * Loaded globally across all Payload Admin views via (payload)/layout.tsx.
+ * ============================================================================= */
+
+/* -----------------------------------------------------------------------------
+ * Table Horizontal Scrolling
+ * -----------------------------------------------------------------------------
+ * Wide collection tables (Webhook Deliveries, Transactions, Logs, Apps) contain
+ * multiple wide columns (Endpoints, Hashes, Keys, Timestamps, Actions).
+ *
+ * Payload's default table styles set `width: 100%` on both the wrapper and the
+ * table, which compresses columns into the viewport width and clips right-hand
+ * columns off the edge with no scrollbar.
+ *
+ * Setting `overflow-x: auto` on the wrapper and `min-width: max-content` on the
+ * table guarantees that:
+ * 1. Narrow tables still expand to fill 100% of the page width.
+ * 2. Wide tables retain their natural column widths and smoothly scroll horizontally.
+ * 3. Modern, thin, visible scrollbars allow effortless horizontal navigation.
+ * ----------------------------------------------------------------------------- */
+
+.collection-list,
+.collection-list__wrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.collection-list__tables,
+.table-wrap,
+.relationship-table {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto !important;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--theme-elevation-250, rgba(150, 150, 150, 0.4)) transparent;
+
+  &::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: var(--theme-elevation-50, rgba(0, 0, 0, 0.05));
+    border-radius: 4px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--theme-elevation-250, rgba(150, 150, 150, 0.4));
+    border-radius: 4px;
+
+    &:hover {
+      background: var(--theme-elevation-400, rgba(150, 150, 150, 0.7));
+    }
+  }
+
+  table {
+    width: 100%;
+    min-width: max-content !important;
+    table-layout: auto;
+
+    th {
+      white-space: nowrap;
+    }
+  }
+}

@@ -1,0 +1,49 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+injectWorkspacePackages: true
+blockExoticSubdeps: true
+minimumReleaseAge: 10080
+trustPolicy: no-downgrade
+trustPolicyExclude:
+  - "@noble/curves"
+  - "@noble/hashes"
+  - chokidar
+  - eslint-import-resolver-typescript
+  - pino
+  - reselect
+  - semver
+  - slow-redact
+  - tinyexec
+  - undici-types
+  - resend
+supportedArchitectures:
+  os:
+    - current
+    - linux
+  cpu:
+    - current
+    - x64
+    - arm64
+allowBuilds:
+  '@nestjs/core': false
+  '@reown/appkit': false
+  '@sentry-internal/node-cpu-profiler': false
+  '@sentry/cli': false
+  '@sentry/node-cpu-profiler': false
+  '@swc/core': false
+  canvas: false
+  esbuild: false
+  msgpackr-extract: false
+  sharp: true
+  unrs-resolver: false
+minimumReleaseAgeExclude:
+  - "*"
+
+overrides:
+  brace-expansion: "^5.0.9"
+  sharp: "0.33.5"
+  tar: "^7.5.21"
+  fast-uri: "^3.1.6"
+  find-my-way: "^9.7.0"
+  ip-address: "^10.3.1"

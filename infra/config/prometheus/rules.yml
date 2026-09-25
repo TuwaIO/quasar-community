@@ -1,0 +1,371 @@
+groups:
+  - name: QuasarAlerts
+    rules:
+      - alert: InstanceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Instance {{ $labels.instance }} down'
+          description: '{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 1 minute.'
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'High memory usage on {{ $labels.instance }}'
+          description: 'Memory usage is above 90% on {{ $labels.instance }} for more than 5 minutes.'
+
+      - alert: RedisAPIMemoryHigh
+        expr: redis_memory_used_bytes{job="redis-api"} / redis_memory_max_bytes{job="redis-api"} > 0.85
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Redis API memory high on {{ $labels.instance }}'
+          description: 'API Redis memory usage is above 85% on {{ $labels.instance }} for more than 5 minutes. Critical risk for BullMQ/IronDome state!'
+
+      - alert: RedisUIMemoryHigh
+        expr: redis_memory_used_bytes{job="redis-ui"} / redis_memory_max_bytes{job="redis-ui"} > 0.90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Redis UI memory high on {{ $labels.instance }}'
+          description: 'UI Redis memory usage is above 90% on {{ $labels.instance }}.LRU eviction active.'
+
+      - alert: NestJS_EventLoopLag
+        expr: nodejs_eventloop_lag_seconds > 0.1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'High Event Loop Lag on NestJS'
+          description: 'Event loop lag is above 100ms on {{ $labels.instance }} for more than 1 minute. Possible CPU throttling or heavy blocking operations.'
+
+      - alert: Pulsar_SyncLag
+        expr: pulsar_sync_lag_seconds > 60
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'High Pulsar Sync Lag'
+          description: 'Transaction tracking lag is above 60s for {{ $labels.ecosystem }} (Chain: {{ $labels.chainId }}). Pulsar is falling behind the blockchain.'
+
+      - alert: QuotaExhausted_HighRate
+        expr: sum(rate(iron_dome_blocks_total{code="402"}[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          category: business
+        annotations:
+          summary: 'High rate of Insufficient Quota blocks'
+          description: 'Multiple organizations are hitting quota limits (>10 blocks/sec over 5m). Opportunity for upgrade!'
+
+      - alert: WebhookFailures_Critical
+        expr: (sum(rate(webhook_delivery_total{status="failure"}[5m])) / sum(rate(webhook_delivery_total[5m]))) > 0.2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Critical Webhook Failure Rate'
+          description: 'Webhook failure rate is above 20% over the last 5 minutes. Check dispatcher logs and network connectivity.'
+
+      - alert: BullMQ_QueueBacklogHigh
+        expr: queue_jobs_count{status="waiting"} > 500
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'High Queue Backlog on {{ $labels.queueName }}'
+          description: 'Queue {{ $labels.queueName }} has more than 500 waiting tasks for over 5 minutes. Workers might be throttled or crashed.'
+
+      - alert: BullMQ_QueueBacklogCritical
+        expr: queue_jobs_count{status="waiting"} > 1000
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Critical Queue Backlog on {{ $labels.queueName }}'
+          description: 'Queue {{ $labels.queueName }} has more than 1000 waiting tasks for over 5 minutes. Critical backlog requires immediate developer intervention.'
+
+      - alert: PostgresConnectionsHigh
+        expr: pg_stat_database_numbackends > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'High Postgres Connections on {{ $labels.instance }}'
+          description: 'Postgres connection count is above 80 on {{ $labels.instance }} for more than 2 minutes.'
+
+      - alert: BullMQ_QueueFailedJobsHigh
+        expr: queue_jobs_count{status="failed"} > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'High number of Failed Jobs in Queue {{ $labels.queueName }}'
+          description: 'Queue {{ $labels.queueName }} has more than 50 failed jobs. Immediate worker investigation recommended.'
+
+      - alert: PgBouncerSaturation
+        expr: pgbouncer_pools_client_waiting_connections > 10
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'PgBouncer Saturation Detected'
+          description: 'PgBouncer has {{ $value }} clients waiting in pool queue for over 1 minute.'
+
+      - alert: DBReplicationLag
+        expr: pg_replication_lag_seconds > 30
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Database Replication Lag exceeds limit'
+          description: 'Database replication lag on standby instance {{ $labels.instance }} is above 30 seconds (current: {{ $value }}s).'
+
+      - alert: RedisAPIClusterHealth
+        expr: redis_cluster_state{job="redis-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Redis API Cluster Health Failure'
+          description: 'API Redis cluster state is in fail status or cluster has unassigned slots on {{ $labels.instance }}.'
+
+      - alert: AnomalousBillingQuotaDelta
+        expr: sum(rate(webhook_delivery_total{status="success"}[5m])) > 10 * sum(rate(webhook_delivery_total{status="success"}[5m] offset 1h))
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Anomalous Webhook Surge'
+          description: 'Successful webhook delivery rate surged abnormally over 10x compared to the previous hour. Potential anomalous billing activity.'
+
+      - alert: HostCPULimit
+        expr: (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100 > 95
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Host CPU usage is above 95%'
+          description: 'CPU usage has been above 95% for 3 minutes. Immediate attention required.'
+
+      - alert: HostDiskSpaceCritical
+        expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 > 90
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Disk usage above 90% on {{ $labels.mountpoint }}'
+          description: 'Filesystem is nearly full. Risk of service failure.'
+
+      - alert: PostgreSQLDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'PostgreSQL is unreachable'
+          description: 'postgres-exporter cannot connect to PostgreSQL at {{ $labels.instance }}. Database may be down.'
+
+      - alert: PostgreSQLWALArchiveStalled
+        expr: |
+          pg_stat_archiver_archived_count > 0
+          and (time() - pg_stat_archiver_last_archived_time) > 300
+        for: 5m
+        labels:
+          severity: critical
+          category: backup
+        annotations:
+          summary: 'PostgreSQL WAL-G archiving is stalled'
+          description: 'No WAL segment has been archived by {{ $labels.instance }} for more than 5 minutes. Check WAL-G, R2 connectivity, credentials, and disk pressure.'
+
+      - alert: PostgreSQLWALArchiveFailures
+        expr: increase(pg_stat_archiver_failed_count[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          category: backup
+        annotations:
+          summary: 'PostgreSQL WAL archive failed'
+          description: 'PostgreSQL reported a failed WAL archive on {{ $labels.instance }}. WAL is retained locally and disk exhaustion can stop writes.'
+
+      - alert: ContainerOOMEvent
+        expr: increase(container_oom_events_total{job="cadvisor", image!=""}[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Container {{ $labels.name }} had an OOM event'
+          description: 'Out-Of-Memory event detected for {{ $labels.name }}. Increase memory limits.'
+
+      - alert: TraefikDown
+        expr: up{job="traefik"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Traefik reverse proxy is down'
+          description: 'Traefik at {{ $labels.instance }} is unreachable. All external traffic is blocked.'
+
+      - alert: QuasarAppSLOErrorRate
+        expr: sum(rate(quasar_dashboard_http_requests_total{status=~"5.."}[5m])) / sum(rate(quasar_dashboard_http_requests_total[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Quasar Dashboard App (Next.js) error rate exceeds 5%'
+          description: 'The Next.js dashboard error rate is {{ $value | printf "%.2f" }}% over the last 5 minutes.'
+
+      - alert: QuasarNestSLOErrorRate
+        expr: sum(rate(http_request_duration_seconds_count{status=~"5.."}[5m])) / sum(rate(http_request_duration_seconds_count[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Quasar NestJS Engine error rate exceeds 5%'
+          description: 'The NestJS API error rate is {{ $value | printf "%.2f" }}% over the last 5 minutes.'
+
+      - alert: QuasarNestSLOLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 0.5
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Quasar NestJS Engine p95 latency exceeds 500ms'
+          description: 'The NestJS API p95 latency is {{ $value }}s over the last 5 minutes.'
+
+      - alert: QuotaNegativeOverdraftReached
+        expr: increase(quota_negative_overdraft_limit_reached_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: warning
+          category: business
+        annotations:
+          summary: 'Organization reached negative quota floor'
+          description: 'One or more organizations reached the absolute overdraft floor (-10,000 units) and has been capped.'
+
+      - alert: SyntheticProbeFailed
+        expr: probe_success == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Synthetic probe failed for {{ $labels.instance }}'
+          description: 'Blackbox probe of {{ $labels.instance }} failed. Endpoint is unresponsive or returning non-2xx status.'
+
+      - alert: BlackboxProbeMetricsMissing
+        expr: absent(probe_success{job="blackbox"}) or absent(probe_success{job="blackbox-internal"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Blackbox probe metrics are missing'
+          description: 'Prometheus cannot find one or more configured public/internal blackbox probe series. Do not interpret the dashboard as healthy.'
+
+      - alert: CloudflaredTunnelDown
+        expr: (cloudflared_tunnel_user_connections or cloudflared_tunnel_ha_connections) == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Cloudflare Tunnel connector has no active edge connections'
+          description: 'cloudflared connector at {{ $labels.instance }} has 0 active edge connections. External ingress is compromised.'
+
+      - alert: CloudflaredTunnelMetricsMissing
+        expr: absent(cloudflared_tunnel_user_connections) and absent(cloudflared_tunnel_ha_connections)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Cloudflare Tunnel connection metrics are missing'
+          description: 'Prometheus cannot find cloudflared tunnel metrics. Treat the tunnel telemetry path as unavailable until the exporter is verified.'
+
+      - alert: SSLCertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry - time()) < 86400 * 15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'SSL Certificate for {{ $labels.instance }} expiring soon'
+          description: 'The SSL/TLS certificate for {{ $labels.instance }} will expire in less than 15 days.'
+
+      - alert: CloudflareEdgeBypassOrTunnelFailure
+        expr: (probe_success{job="blackbox"} == 0) and on(service) (probe_success{job="blackbox-internal"} == 1)
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Cloudflare Edge / Tunnel failure for service {{ $labels.service }}'
+          description: 'Public synthetic probe for service {{ $labels.service }} ({{ $labels.instance }}) failed through Cloudflare Edge while the internal container probe is healthy. Check Cloudflare Tunnel, WAF, or DNS routing for {{ $labels.service }}.'
+
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+          alertname: Watchdog
+        annotations:
+          summary: 'Alertmanager Dead-mans switch'
+          description: 'This is an alert meant to ensure that the entire alerting pipeline is functional.'
+
+
+  - name: QuasarRecordingRules
+    interval: 30s
+    rules:
+      - record: quasar:nest_http_requests:rate5m
+        expr: sum by (instance) (rate(http_request_duration_seconds_count{job="quasar-nest"}[5m]))
+      - record: quasar:nest_http_errors:rate5m
+        expr: sum by (instance) (rate(http_request_duration_seconds_count{job="quasar-nest",status=~"5.."}[5m]))
+      - record: quasar:nest_http_error_ratio:rate5m
+        expr: quasar:nest_http_errors:rate5m / clamp_min(quasar:nest_http_requests:rate5m, 0.0001)
+      - record: quasar:nest_http_latency:p95_5m
+        expr: histogram_quantile(0.95, sum by (instance, le) (rate(http_request_duration_seconds_bucket{job="quasar-nest"}[5m])))
+      - record: quasar:pulsar_transactions:rate5m
+        expr: sum by (status) (rate(pulsar_tx_total[5m]))
+      - record: quasar:webhook_deliveries:rate5m
+        expr: sum by (status) (rate(webhook_delivery_total[5m]))
+      - record: quasar:webhook_success_ratio:rate5m
+        expr: sum(rate(webhook_delivery_total{status="success"}[5m])) / clamp_min(sum(rate(webhook_delivery_total[5m])), 0.0001)
+
+  - name: QuasarMonitoringAvailability
+    rules:
+      - alert: QuasarNestMetricsMissing
+        expr: absent(up{job="quasar-nest"}) or absent(http_request_duration_seconds_count{job="quasar-nest"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'NestJS metrics are missing'
+          description: 'Prometheus cannot find the NestJS scrape target or HTTP metrics.'
+
+      - alert: QuasarBusinessMetricsMissing
+        expr: absent(pulsar_tx_total) and absent(webhook_delivery_total) and absent(queue_jobs_count)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Quasar business metrics are missing'
+          description: 'No Pulsar, webhook, or queue metrics have been exposed for 10 minutes.'
+
+      - alert: QuasarNestErrorRateHigh
+        expr: quasar:nest_http_error_ratio:rate5m > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'NestJS error rate exceeds 5%'
+          description: 'NestJS HTTP 5xx error rate is {{ $value | humanizePercentage }}.'
+
+      - alert: QuasarNestLatencyHigh
+        expr: quasar:nest_http_latency:p95_5m > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'NestJS p95 latency exceeds 500ms'
+          description: 'NestJS HTTP p95 latency is {{ $value | humanizeDuration }}.'

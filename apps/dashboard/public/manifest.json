@@ -1,0 +1,17 @@
+{
+  "short_name": "Quasar",
+  "name": "Quasar Community Edition | Self-Hosted Infrastructure",
+  "description": "Quasar Community Edition — Self-hosted headless Web3 transaction indexing and tracking engine.",
+  "icons": [
+    {
+      "src": "/icon0.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "./",
+  "display": "standalone",
+  "theme_color": "#000000",
+  "background_color": "#ffffff"
+}

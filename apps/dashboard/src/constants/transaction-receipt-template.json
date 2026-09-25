@@ -1,0 +1,734 @@
+{
+  "pdfmeVersion": "5.3.17",
+  "author": "TUWA",
+  "basePdf": {
+    "width": 210,
+    "height": 297,
+    "padding": [15, 15, 15, 15],
+    "staticSchema": [
+      {
+        "name": "footerText",
+        "type": "text",
+        "content": "TUWA — QUASAR  •  https://example.com  •  This receipt is automatically generated and serves as digital proof of the transaction execution.",
+        "position": { "x": 15, "y": 277 },
+        "width": 180,
+        "height": 8,
+        "rotate": 0,
+        "alignment": "center",
+        "verticalAlignment": "middle",
+        "fontSize": 6,
+        "lineHeight": 1.4,
+        "characterSpacing": 0,
+        "fontColor": "#999999",
+        "readOnly": true,
+        "fontName": "Roboto"
+      }
+    ]
+  },
+  "schemas": [
+    [
+      {
+        "name": "title",
+        "type": "text",
+        "position": { "x": 15, "y": 15 },
+        "width": 130,
+        "height": 10,
+        "content": "TRANSACTION RECEIPT",
+        "fontName": "Roboto",
+        "alignment": "left",
+        "fontSize": 20,
+        "readOnly": true,
+        "fontColor": "#111111"
+      },
+      {
+        "name": "brand",
+        "type": "text",
+        "position": { "x": 145, "y": 15 },
+        "width": 50,
+        "height": 10,
+        "content": "QUASAR",
+        "fontName": "Roboto",
+        "alignment": "right",
+        "fontSize": 20,
+        "readOnly": true,
+        "fontColor": "#CCCCCC"
+      },
+      {
+        "name": "txId",
+        "type": "text",
+        "position": { "x": 15, "y": 26 },
+        "width": 180,
+        "height": 5,
+        "fontName": "Roboto",
+        "alignment": "left",
+        "fontSize": 9,
+        "fontColor": "#777777",
+        "readOnly": false
+      },
+      {
+        "name": "date",
+        "type": "text",
+        "position": { "x": 15, "y": 31 },
+        "width": 180,
+        "height": 5,
+        "fontName": "Roboto",
+        "alignment": "left",
+        "fontSize": 9,
+        "fontColor": "#777777",
+        "readOnly": false
+      },
+
+      {
+        "name": "line1",
+        "type": "line",
+        "position": { "x": 15, "y": 39 },
+        "width": 180,
+        "height": 0.3,
+        "color": "#E0E0E0",
+        "readOnly": true
+      },
+
+      {
+        "name": "secStatus",
+        "type": "text",
+        "position": { "x": 15, "y": 43 },
+        "width": 180,
+        "height": 6,
+        "content": "EXECUTION STATUS",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true,
+        "characterSpacing": 2
+      },
+      {
+        "name": "status",
+        "type": "text",
+        "position": { "x": 15, "y": 50 },
+        "width": 180,
+        "height": 8,
+        "fontName": "Roboto",
+        "fontSize": 16,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "line2",
+        "type": "line",
+        "position": { "x": 15, "y": 62 },
+        "width": 180,
+        "height": 0.3,
+        "color": "#E0E0E0",
+        "readOnly": true
+      },
+
+      {
+        "name": "secCore",
+        "type": "text",
+        "position": { "x": 15, "y": 66 },
+        "width": 180,
+        "height": 5,
+        "content": "TRANSACTION DETAILS",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true,
+        "characterSpacing": 2
+      },
+
+      {
+        "name": "lType",
+        "type": "text",
+        "position": { "x": 15, "y": 74 },
+        "width": 35,
+        "height": 5,
+        "content": "TYPE",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "type",
+        "type": "text",
+        "position": { "x": 50, "y": 74 },
+        "width": 50,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+      {
+        "name": "lAdapter",
+        "type": "text",
+        "position": { "x": 105, "y": 74 },
+        "width": 35,
+        "height": 5,
+        "content": "ADAPTER",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "adapter",
+        "type": "text",
+        "position": { "x": 140, "y": 74 },
+        "width": 55,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "lNetwork",
+        "type": "text",
+        "position": { "x": 15, "y": 82 },
+        "width": 35,
+        "height": 5,
+        "content": "NETWORK",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "network",
+        "type": "text",
+        "position": { "x": 50, "y": 82 },
+        "width": 145,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "lHash",
+        "type": "text",
+        "position": { "x": 15, "y": 90 },
+        "width": 35,
+        "height": 5,
+        "content": "HASH",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "hash",
+        "type": "text",
+        "position": { "x": 50, "y": 90 },
+        "width": 145,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "lFrom",
+        "type": "text",
+        "position": { "x": 15, "y": 98 },
+        "width": 35,
+        "height": 5,
+        "content": "FROM",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "from",
+        "type": "text",
+        "position": { "x": 50, "y": 98 },
+        "width": 145,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "lTo",
+        "type": "text",
+        "position": { "x": 15, "y": 106 },
+        "width": 35,
+        "height": 5,
+        "content": "TO",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "to",
+        "type": "text",
+        "position": { "x": 50, "y": 106 },
+        "width": 145,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "lValue",
+        "type": "text",
+        "position": { "x": 15, "y": 114 },
+        "width": 35,
+        "height": 5,
+        "content": "VALUE",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "value",
+        "type": "text",
+        "position": { "x": 50, "y": 114 },
+        "width": 145,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "line3",
+        "type": "line",
+        "position": { "x": 15, "y": 123 },
+        "width": 180,
+        "height": 0.3,
+        "color": "#E0E0E0",
+        "readOnly": true
+      },
+
+      {
+        "name": "secTime",
+        "type": "text",
+        "position": { "x": 15, "y": 127 },
+        "width": 180,
+        "height": 5,
+        "content": "TIMESTAMPS",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true,
+        "characterSpacing": 2
+      },
+
+      {
+        "name": "lSubmitted",
+        "type": "text",
+        "position": { "x": 15, "y": 135 },
+        "width": 35,
+        "height": 5,
+        "content": "SUBMITTED",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "submittedAt",
+        "type": "text",
+        "position": { "x": 50, "y": 135 },
+        "width": 50,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+      {
+        "name": "lFinished",
+        "type": "text",
+        "position": { "x": 105, "y": 135 },
+        "width": 35,
+        "height": 5,
+        "content": "FINISHED",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "finishedAt",
+        "type": "text",
+        "position": { "x": 140, "y": 135 },
+        "width": 55,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "line4",
+        "type": "line",
+        "position": { "x": 15, "y": 144 },
+        "width": 180,
+        "height": 0.3,
+        "color": "#E0E0E0",
+        "readOnly": true
+      },
+
+      {
+        "name": "secExec",
+        "type": "text",
+        "position": { "x": 15, "y": 148 },
+        "width": 180,
+        "height": 5,
+        "content": "EXECUTION DATA",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true,
+        "characterSpacing": 2
+      },
+
+      {
+        "name": "lTracker",
+        "type": "text",
+        "position": { "x": 15, "y": 156 },
+        "width": 35,
+        "height": 5,
+        "content": "TRACKER",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "tracker",
+        "type": "text",
+        "position": { "x": 50, "y": 156 },
+        "width": 50,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+      {
+        "name": "lConnector",
+        "type": "text",
+        "position": { "x": 105, "y": 156 },
+        "width": 35,
+        "height": 5,
+        "content": "CONNECTOR",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "connector",
+        "type": "text",
+        "position": { "x": 140, "y": 156 },
+        "width": 55,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "lNonce",
+        "type": "text",
+        "position": { "x": 15, "y": 164 },
+        "width": 35,
+        "height": 5,
+        "content": "NONCE",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "nonce",
+        "type": "text",
+        "position": { "x": 50, "y": 164 },
+        "width": 50,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+      {
+        "name": "lFee",
+        "type": "text",
+        "position": { "x": 105, "y": 164 },
+        "width": 35,
+        "height": 5,
+        "content": "FEE",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "fee",
+        "type": "text",
+        "position": { "x": 140, "y": 164 },
+        "width": 55,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "lMaxFee",
+        "type": "text",
+        "position": { "x": 15, "y": 172 },
+        "width": 35,
+        "height": 5,
+        "content": "MAX FEE",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "maxFee",
+        "type": "text",
+        "position": { "x": 50, "y": 172 },
+        "width": 50,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+      {
+        "name": "lMaxPriority",
+        "type": "text",
+        "position": { "x": 105, "y": 172 },
+        "width": 35,
+        "height": 5,
+        "content": "PRIORITY",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "maxPriority",
+        "type": "text",
+        "position": { "x": 140, "y": 172 },
+        "width": 55,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "lSlot",
+        "type": "text",
+        "position": { "x": 15, "y": 180 },
+        "width": 35,
+        "height": 5,
+        "content": "SLOT",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "slot",
+        "type": "text",
+        "position": { "x": 50, "y": 180 },
+        "width": 50,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+      {
+        "name": "lConfirm",
+        "type": "text",
+        "position": { "x": 105, "y": 180 },
+        "width": 35,
+        "height": 5,
+        "content": "CONFIRMS",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "confirmations",
+        "type": "text",
+        "position": { "x": 140, "y": 180 },
+        "width": 55,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "lReplaced",
+        "type": "text",
+        "position": { "x": 15, "y": 188 },
+        "width": 35,
+        "height": 5,
+        "content": "REPLACED",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "replacedTxHash",
+        "type": "text",
+        "position": { "x": 50, "y": 188 },
+        "width": 145,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "lContract",
+        "type": "text",
+        "position": { "x": 15, "y": 196 },
+        "width": 35,
+        "height": 5,
+        "content": "CONTRACT",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "contractAddress",
+        "type": "text",
+        "position": { "x": 50, "y": 196 },
+        "width": 145,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "line5",
+        "type": "line",
+        "position": { "x": 15, "y": 205 },
+        "width": 180,
+        "height": 0.3,
+        "color": "#E0E0E0",
+        "readOnly": true
+      },
+
+      {
+        "name": "secApp",
+        "type": "text",
+        "position": { "x": 15, "y": 209 },
+        "width": 180,
+        "height": 5,
+        "content": "APPLICATION",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true,
+        "characterSpacing": 2
+      },
+
+      {
+        "name": "lApp",
+        "type": "text",
+        "position": { "x": 15, "y": 217 },
+        "width": 35,
+        "height": 5,
+        "content": "APP NAME",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "appName",
+        "type": "text",
+        "position": { "x": 50, "y": 217 },
+        "width": 50,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 9,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+      {
+        "name": "lTxKey",
+        "type": "text",
+        "position": { "x": 105, "y": 217 },
+        "width": 35,
+        "height": 5,
+        "content": "TX KEY",
+        "fontName": "Roboto",
+        "fontSize": 8,
+        "fontColor": "#999999",
+        "readOnly": true
+      },
+      {
+        "name": "txKey",
+        "type": "text",
+        "position": { "x": 140, "y": 217 },
+        "width": 55,
+        "height": 5,
+        "fontName": "Roboto",
+        "fontSize": 7,
+        "fontColor": "#111111",
+        "readOnly": false
+      },
+
+      {
+        "name": "line6",
+        "type": "line",
+        "position": { "x": 15, "y": 226 },
+        "width": 180,
+        "height": 0.3,
+        "color": "#E0E0E0",
+        "readOnly": true
+      },
+
+      {
+        "name": "disclaimer",
+        "type": "text",
+        "position": { "x": 15, "y": 230 },
+        "width": 180,
+        "height": 12,
+        "content": "This receipt is automatically generated by the Quasar Engine and serves as digital proof of the transaction execution at the specified timestamp. Verify on-chain data using the transaction hash above. No financial advice is implied.",
+        "fontName": "Roboto",
+        "fontSize": 7,
+        "fontColor": "#AAAAAA",
+        "readOnly": true,
+        "lineHeight": 1.4
+      }
+    ]
+  ]
+}

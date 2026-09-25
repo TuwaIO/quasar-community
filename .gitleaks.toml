@@ -1,0 +1,22 @@
+# Without this block the file REPLACES gitleaks' built-in ruleset instead of
+# extending it: a config holding only an [allowlist] has zero rules, and every
+# scan passes. That was the state from 2026-06-08 to 2026-09-25 — a planted
+# `ghp_` token went undetected. Keep it first in the file.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ignore mock variables, seed data, and test files containing false positives"
+paths = [
+    # Mock data & seeds
+    '''src/payload/seed\.ts''',
+    # Unit & integration tests
+    '''src/tests/.*''',
+    # Engine specs colocated with the code: fixture encryption keys, webhook
+    # signing secrets and tx hashes trip generic-api-key.
+    '''\.spec\.ts$''',
+    # Documentation files
+    '''docs/.*''',
+    # Docker files with build-time dummy values
+    '''infra/dockerfiles/Dockerfile\.app'''
+]

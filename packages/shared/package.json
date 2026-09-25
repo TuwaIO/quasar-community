@@ -1,0 +1,68 @@
+{
+  "name": "@tuwaio/shared",
+  "version": "0.0.1",
+  "author": "Oleksandr Tkach",
+  "license": "Apache-2.0",
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./encryption": {
+      "types": "./dist/encryption.d.ts",
+      "import": "./dist/encryption.js",
+      "require": "./dist/encryption.cjs"
+    },
+    "./cuid": {
+      "types": "./dist/cuid.d.ts",
+      "import": "./dist/cuid.js",
+      "require": "./dist/cuid.cjs"
+    },
+    "./constants": {
+      "types": "./dist/constants.d.ts",
+      "import": "./dist/constants.js",
+      "require": "./dist/constants.cjs"
+    },
+    "./billing": {
+      "types": "./dist/billing.d.ts",
+      "import": "./dist/billing.js",
+      "require": "./dist/billing.cjs"
+    },
+    "./utils": {
+      "types": "./dist/utils.d.ts",
+      "import": "./dist/utils.js",
+      "require": "./dist/utils.cjs"
+    },
+    "./fixtures": {
+      "types": "./dist/fixtures/index.d.ts",
+      "import": "./dist/fixtures/index.js",
+      "require": "./dist/fixtures/index.cjs"
+    },
+    "./crash-injection": {
+      "types": "./dist/crash-injection.d.ts",
+      "import": "./dist/crash-injection.js",
+      "require": "./dist/crash-injection.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@paralleldrive/cuid2": "^3.3.0"
+  },
+  "peerDependencies": {
+    "viem": "^2.51.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "tsup": "^8.5.1",
+    "typescript": "6.0.3",
+    "viem": "^2.56.3",
+    "vitest": "^5.0.0"
+  }
+}

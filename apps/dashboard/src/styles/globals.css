@@ -1,0 +1,52 @@
+@import '@tuwaio/sdk/styles/all.css';
+@import '@tuwaio/docs-ui/dist/index.css';
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
+}
+
+h1, h2, h3, .font-heading {
+  font-family: var(--font-mono);
+}
+
+h4, h5, h6 {
+  font-family: var(--font-sans);
+}
+
+.Toastify__toast {
+  @apply p-0 bg-transparent shadow-none;
+}
+
+.Toastify__toast-body {
+  @apply m-0 p-0;
+}
+
+.Toastify__toast-container {
+  @apply pointer-events-auto;
+}
+
+.Toastify__toast--success .Dashboard_toast {
+  @apply border-[color:var(--tuwa-success-icon)]/20 bg-[var(--tuwa-success-bg)] text-[var(--tuwa-success-text)];
+}
+
+.Toastify__toast--error .Dashboard_toast {
+  @apply border-[color:var(--tuwa-error-icon)]/20 bg-[var(--tuwa-error-bg)] text-[var(--tuwa-error-text)];
+}
+
+.Toastify__toast--warning .Dashboard_toast {
+  @apply border-[color:var(--tuwa-pending-icon)]/20 bg-[var(--tuwa-pending-bg)] text-[var(--tuwa-pending-text)];
+}
+
+.Toastify__toast--info .Dashboard_toast {
+  @apply border-[color:var(--tuwa-info-icon)]/20 bg-[var(--tuwa-info-bg)] text-[var(--tuwa-info-text)];
+}
+
+.Dashboard_toast {
+  @apply rounded-[var(--tuwa-rounded-corners)] border border-[var(--tuwa-border-primary)] shadow-lg;
+  @apply bg-[var(--tuwa-bg-primary)] text-[var(--tuwa-text-primary)];
+  @apply backdrop-blur-md;
+  padding: 8px !important;
+}

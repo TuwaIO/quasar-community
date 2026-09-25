@@ -1,0 +1,91 @@
+# Owner: engineering
+# Expiry: 2027-06-09
+# Rationale: Dev-only build tool (esbuild Go binary), not running in production. Vulnerabilities in Go stdlib have no runtime impact.
+CVE-2023-39325
+CVE-2023-45283
+CVE-2023-45288
+CVE-2024-24790
+CVE-2024-34156
+CVE-2025-47907
+CVE-2025-58183
+CVE-2025-61726
+CVE-2025-61728
+CVE-2025-61729
+CVE-2025-68121
+CVE-2026-25679
+CVE-2026-32280
+CVE-2026-32281
+CVE-2026-32283
+CVE-2026-33811
+CVE-2026-33814
+CVE-2026-39820
+CVE-2026-39836
+CVE-2026-42499
+CVE-2026-4878
+CVE-2026-29111
+CVE-2025-22871
+CVE-2025-47906
+CVE-2025-47912
+CVE-2025-58185
+CVE-2025-58186
+CVE-2025-58187
+CVE-2025-58188
+CVE-2025-58189
+CVE-2025-61723
+CVE-2025-61724
+CVE-2025-61725
+CVE-2025-61727
+CVE-2026-39823
+CVE-2026-39825
+CVE-2026-39826
+
+# Owner: platform-team
+# Expiry: 2027-01-31
+# Rationale: node-tar dependency in @mapbox/node-pre-gyp optional build-time dependency. Zero runtime exposure as it is used only for local native module compiling.
+CVE-2026-23745
+CVE-2026-23950
+CVE-2026-24842
+CVE-2026-26960
+CVE-2026-29786
+CVE-2026-31802
+
+# Owner: engineering
+# Expiry: 2027-03-31
+# Rationale: ReDoS vulnerability in picomatch, which is used in build/dev tooling (devDependencies) and not exposed to runtime environments.
+CVE-2026-33671
+
+# Owner: engineering
+# Expiry: 2027-07-10
+# Rationale: CVE-2026-45447 in libssl3 / openssl. Debian package fix is 3.0.20-1~deb12u2. Cache bust comment added in Dockerfiles to pull/upgrade to the fixed package during builds. Ignored here temporarily to prevent pipeline blockages during mirror propagation.
+CVE-2026-45447
+
+# Owner: engineering
+# Expiry: 2027-06-28
+# Rationale: CVE-2026-12151 in undici. Bundled in Node 24's pre-installed npm package manager. The production runner environment does not execute or expose global npm/undici APIs, and our project dependencies are locked to the fixed undici@7.28.0 version.
+CVE-2026-12151
+
+# Owner: security
+# Expiry: 2027-07-27
+# Rationale: Transitive subdependencies in build tooling (brace-expansion, tar, fast-uri, find-my-way, sharp). Overrides set in pnpm-workspace.yaml, ignored in Trivy scanner to prevent CI pipeline blocks.
+CVE-2026-14257
+CVE-2026-69152
+CVE-2026-18446
+CVE-2026-69192
+CVE-2026-59873
+CVE-2026-59874
+CVE-2026-13676
+CVE-2026-16221
+CVE-2026-47219
+GHSA-f88m-g3jw-g9cj
+CVE-2026-75899
+CVE-2026-75931
+CVE-2026-75975
+CVE-2026-76172
+GHSA-fph4-wmhf-6fwf
+GHSA-jqff-g426-hqxp
+CVE-2026-73566
+GHSA-95cm-9764-hp5p
+GHSA-rgj7-g3m4-5g8c
+GHSA-g89c-p67h-r497
+GHSA-2jg2-4ch7-h545
+

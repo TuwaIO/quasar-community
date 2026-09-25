@@ -1,0 +1,47 @@
+# Cloudflare Tunnel ingress for a Quasar Community node.
+#
+# Generated from the production topology with the domain parameterised.
+# Either run scripts/setup-cloudflare-tunnel.sh (creates the tunnel, the
+# DNS records and a filled-in copy of this file through the Cloudflare
+# API), or copy this to tunnel.yml and substitute your own domain by hand.
+#
+# Cloudflare Tunnel is optional: Traefik can also terminate TLS directly.
+# See docs/QUICKSTART_LOCAL.md.
+
+# Reference routings for the Docker-network Traefik reverse proxy.
+# Active Public Hostnames are managed remotely in Cloudflare Zero Trust.
+
+# REFERENCE ONLY. The tunnel is really named `quasar`, and its live ingress
+# carries traefik.${DOMAIN}, which this file used to omit — the same drift found
+# in tunnel.stg.yml. Verify against the Cloudflare API before any change.
+
+tunnel: quasar
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  # Management Layer (Dashboard UI, Payload Admin, Client Auth)
+  - hostname: quasar.${DOMAIN}
+    service: http://traefik:80
+
+  # Performance Layer (NestJS API Engine)
+  - hostname: api.${DOMAIN}
+    service: http://traefik:80
+
+  # Monitoring Dashboard (Grafana protected by Traefik basic-auth)
+  - hostname: grafana.${DOMAIN}
+    service: http://traefik:80
+
+  # Database Administration Panel (pgAdmin protected by Traefik basic-auth)
+  - hostname: pgadmin.${DOMAIN}
+    service: http://traefik:80
+
+  # Cache Administration Panel (RedisInsight protected by Traefik basic-auth)
+  - hostname: redis.${DOMAIN}
+    service: http://traefik:80
+
+  # Traefik dashboard (protected by Traefik basic-auth)
+  - hostname: traefik.${DOMAIN}
+    service: http://traefik:80
+
+  # Catch-all rule for unmatched requests
+  - service: http_status:404

@@ -1,0 +1,12 @@
+groups:
+  - name: security_alerts
+    rules:
+      - alert: ApiBruteForceAttempt
+        expr: |
+          sum by (job) (count_over_time({job=~".+"} |= "Unauthorized" [1m])) > 10
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'API Brute Force detected'
+          description: 'Over 10 unauthorized requests detected in 1 minute. Possible API key probing.'

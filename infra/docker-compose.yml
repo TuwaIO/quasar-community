@@ -1,0 +1,1268 @@
+name: quasar
+
+x-logging: &loki-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  traefik-init:
+    image: httpd:2.4.67-alpine@sha256:0136c2d4462f3b8ecc92bea70efdfef4d06523999ae8d7aa533969dea6db4576
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        htpasswd -nbB "$${TRAEFIK_USER}" "$${TRAEFIK_PASSWORD}" > /shared/users.txt
+        echo "[traefik-init] users.txt generated"
+    environment:
+      TRAEFIK_USER: ${TRAEFIK_USER:-admin}
+      TRAEFIK_PASSWORD: ${TRAEFIK_PASSWORD}
+    volumes:
+      - traefik_auth:/shared
+    networks:
+      - backend_net
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.2@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1
+      - NETWORKS=1
+      - SERVICES=1
+      - SWARM=0
+      - TASKS=0
+      - VOLUMES=0
+      - INFO=1
+      - VERSION=1
+      - POST=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - backend_net
+    logging: *loki-logging
+
+  traefik:
+    image: traefik:v3.6.17@sha256:802adc80a7bb20a6766c9385c2ad547f0de98564cd20d31d0b6d8f726f906f66
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:80:80'
+      - '127.0.0.1:443:443'
+    volumes:
+      - ./config/traefik/traefik.yml:/traefik.yml:ro
+      - traefik_auth:/auth:ro
+    depends_on:
+      traefik-init:
+        condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
+    networks:
+      - public_net
+      - backend_net
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.middlewares.basic-auth.basicauth.usersfile=/auth/users.txt'
+    logging: *loki-logging
+
+  postgresql-primary:
+    build:
+      context: .
+      dockerfile: ./dockerfiles/postgresql-repmgr/Dockerfile
+    image: quasar/postgresql-repmgr:16
+    restart: unless-stopped
+    entrypoint: ['/entrypoint-primary.sh']
+    environment:
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      POSTGRES_DB: ${PG_DB}
+      REPMGR_PASSWORD: ${REPMGR_PASSWORD}
+      WALG_S3_PREFIX: ${WALG_S3_PREFIX:-s3://${S3_BUCKET_POSTGRES}/wal-g}
+      AWS_ENDPOINT: ${S3_ENDPOINT:?S3_ENDPOINT must be set}
+      AWS_REGION: ${S3_REGION:-auto}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID must be set}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY must be set}
+      WALG_LIBSODIUM_KEY: ${WALG_LIBSODIUM_KEY:?WALG_LIBSODIUM_KEY must be set}
+      WALG_LIBSODIUM_KEY_TRANSFORM: ${WALG_LIBSODIUM_KEY_TRANSFORM:-base64}
+      WALG_PREVENT_WAL_OVERWRITE: 'true'
+      WALG_UPLOAD_CONCURRENCY: ${WALG_UPLOAD_CONCURRENCY:-2}
+      WALG_DOWNLOAD_CONCURRENCY: ${WALG_DOWNLOAD_CONCURRENCY:-2}
+      REPMGR_PRIMARY_HOST: ${REPMGR_PRIMARY_HOST:-postgresql-primary}
+      REPMGR_PARTNER_NODES: postgresql-primary,postgresql-standby
+      REPMGR_NODE_NAME: postgresql-primary
+      REPMGR_NODE_NETWORK_NAME: postgresql-primary
+      REPMGR_EVENT_NOTIFICATION_COMMAND: /usr/local/bin/pgbouncer_failover.sh %e %n %a "%t" "%d"
+      REPMGR_NODE_ID: 1
+      REPMGR_ROLE: ${REPMGR_ROLE:-primary}
+    volumes:
+      - pg_primary_data:/var/lib/postgresql/data
+      - ./dockerfiles/postgresql-repmgr/entrypoint-primary.sh:/entrypoint-primary.sh:ro
+      - ./scripts/pgbouncer_failover.sh:/usr/local/bin/pgbouncer_failover.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${PG_USER:-quasar} -d ${PG_DB:-quasar}']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1.5G
+    cpus: 1.5
+    mem_limit: 1536m
+    logging: *loki-logging
+
+  postgresql-standby:
+    build:
+      context: .
+      dockerfile: ./dockerfiles/postgresql-repmgr/Dockerfile
+    image: quasar/postgresql-repmgr:16
+    restart: unless-stopped
+    entrypoint: ['/entrypoint-standby.sh']
+    environment:
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      POSTGRES_DB: ${PG_DB}
+      REPMGR_PASSWORD: ${REPMGR_PASSWORD}
+      WALG_S3_PREFIX: ${WALG_S3_PREFIX:-s3://${S3_BUCKET_POSTGRES}/wal-g}
+      AWS_ENDPOINT: ${S3_ENDPOINT:?S3_ENDPOINT must be set}
+      AWS_REGION: ${S3_REGION:-auto}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID must be set}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY must be set}
+      WALG_LIBSODIUM_KEY: ${WALG_LIBSODIUM_KEY:?WALG_LIBSODIUM_KEY must be set}
+      WALG_LIBSODIUM_KEY_TRANSFORM: ${WALG_LIBSODIUM_KEY_TRANSFORM:-base64}
+      WALG_PREVENT_WAL_OVERWRITE: 'true'
+      WALG_UPLOAD_CONCURRENCY: ${WALG_UPLOAD_CONCURRENCY:-2}
+      WALG_DOWNLOAD_CONCURRENCY: ${WALG_DOWNLOAD_CONCURRENCY:-2}
+      REPMGR_PRIMARY_HOST: postgresql-primary
+      REPMGR_PARTNER_NODES: postgresql-primary,postgresql-standby
+      REPMGR_NODE_NAME: postgresql-standby
+      REPMGR_NODE_NETWORK_NAME: postgresql-standby
+      REPMGR_EVENT_NOTIFICATION_COMMAND: /usr/local/bin/pgbouncer_failover.sh %e %n %a "%t" "%d"
+      REPMGR_NODE_ID: 2
+    volumes:
+      - pg_standby_data:/var/lib/postgresql/data
+      - ./dockerfiles/postgresql-repmgr/entrypoint-standby.sh:/entrypoint-standby.sh:ro
+      - ./scripts/pgbouncer_failover.sh:/usr/local/bin/pgbouncer_failover.sh:ro
+    depends_on:
+      postgresql-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${PG_USER:-quasar} -d ${PG_DB:-quasar}']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    cpus: 1.0
+    mem_limit: 1024m
+    logging: *loki-logging
+
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.1-p0@sha256:c7bfcaa24de830e29588bb9ad1eb39cebaf07c27149e1974445899b695634bb4
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:6432:5432'
+    environment:
+      DB_USER: ${PG_USER:-quasar}
+      DB_PASSWORD: ${PG_PASSWORD}
+      DB_HOST: postgresql-primary
+      DB_NAME: ${PG_DB:-quasar}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 50
+      LISTEN_PORT: 5432
+      AUTH_TYPE: scram-sha-256
+      ADMIN_USERS: ${PG_USER:-quasar}
+    depends_on:
+      postgresql-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${PG_USER:-quasar} -d ${PG_DB:-quasar} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    cpus: 0.5
+    mem_limit: 512m
+    logging: *loki-logging
+
+  pgadmin:
+    image: dpage/pgadmin4:9.15.0@sha256:cefc4cc6b7d9d71a9e81e76fb9d7e14038ab5661b539a190eea1b63fa612589a
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+      PGADMIN_LISTEN_PORT: 80
+      PGADMIN_SERVER_JSON_FILE: /tmp/servers.json
+      PG_USER: ${PG_USER}
+      PG_PASSWORD: ${PG_PASSWORD}
+      PG_DB: ${PG_DB}
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        printf '{"Servers":{"1":{"Name":"Quasar Primary","Group":"Servers","Host":"postgresql-primary","Port":5432,"MaintenanceDB":"%s","Username":"%s","PassFile":"/tmp/pgpass","SSLMode":"prefer"},"2":{"Name":"Quasar Standby","Group":"Servers","Host":"postgresql-standby","Port":5432,"MaintenanceDB":"%s","Username":"%s","PassFile":"/tmp/pgpass","SSLMode":"prefer"}}}' "$${PG_DB}" "$${PG_USER}" "$${PG_DB}" "$${PG_USER}" > /tmp/servers.json
+        printf 'postgresql-primary:5432:%s:%s:%s\npostgresql-standby:5432:%s:%s:%s\n' "$${PG_DB}" "$${PG_USER}" "$${PG_PASSWORD}" "$${PG_DB}" "$${PG_USER}" "$${PG_PASSWORD}" > /tmp/pgpass
+        chmod 600 /tmp/pgpass
+        /entrypoint.sh
+    depends_on:
+      postgresql-primary:
+        condition: service_healthy
+    networks:
+      - backend_net
+      - public_net
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=public_net'
+      - 'traefik.http.services.pgadmin.loadbalancer.server.port=80'
+      - 'traefik.http.routers.pgadmin.middlewares=basic-auth@docker'
+    logging: *loki-logging
+
+  pg-backup:
+    image: eeshugerman/postgres-backup-s3:16@sha256:cfcaa57732c13d0724312a2eea1ad3e385f5ed049de3c626d1ef28ecc13cdddb
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgresql-primary
+      POSTGRES_DATABASE: ${PG_DB}
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      SCHEDULE: ${PG_BACKUP_SCHEDULE:-@daily}
+      BACKUP_KEEP_DAYS: ${PG_BACKUP_KEEP_DAYS:-7}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_S3V4: ${S3_S3V4:-yes}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET_POSTGRES}
+      S3_PREFIX: 'backup'
+      PASSPHRASE: ${PG_BACKUP_PASSPHRASE}
+    volumes:
+      - ./scripts/restore_backup.sh:/restore.sh:ro
+    depends_on:
+      postgresql-primary:
+        condition: service_healthy
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    cpus: 0.5
+    mem_limit: 512m
+    logging: *loki-logging
+
+  wal-g-backup:
+    image: quasar/postgresql-repmgr:16
+    build:
+      context: .
+      dockerfile: ./dockerfiles/postgresql-repmgr/Dockerfile
+    restart: unless-stopped
+    # Do not inherit the PostgreSQL image entrypoint: this is a scheduler,
+    # not a third database instance. It must never initialize or start a
+    # cluster of its own.
+    entrypoint: ['/bin/sh']
+    command: ['/usr/local/bin/wal-g-backup-loop.sh']
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    user: root
+    environment:
+      REPMGR_PASSWORD: ${REPMGR_PASSWORD:?REPMGR_PASSWORD must be set}
+      PGUSER: repmgr
+      PGDATABASE: repmgr
+      WALG_S3_PREFIX: ${WALG_S3_PREFIX:-s3://${S3_BUCKET_POSTGRES}/wal-g}
+      AWS_ENDPOINT: ${S3_ENDPOINT:?S3_ENDPOINT must be set}
+      AWS_REGION: ${S3_REGION:-auto}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID must be set}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY must be set}
+      WALG_LIBSODIUM_KEY: ${WALG_LIBSODIUM_KEY:?WALG_LIBSODIUM_KEY must be set}
+      WALG_LIBSODIUM_KEY_TRANSFORM: ${WALG_LIBSODIUM_KEY_TRANSFORM:-base64}
+      WALG_PREVENT_WAL_OVERWRITE: 'true'
+      WALG_UPLOAD_CONCURRENCY: ${WALG_UPLOAD_CONCURRENCY:-2}
+      WALG_DOWNLOAD_CONCURRENCY: ${WALG_DOWNLOAD_CONCURRENCY:-2}
+      WALG_BACKUP_INTERVAL_SECONDS: ${WALG_BACKUP_INTERVAL_SECONDS:-86400}
+      WALG_BACKUP_ON_START: ${WALG_BACKUP_ON_START:-yes}
+      WALG_RETAIN_FULL_BACKUPS: ${WALG_RETAIN_FULL_BACKUPS:-7}
+    volumes:
+      - ./scripts/wal-g-backup-loop.sh:/usr/local/bin/wal-g-backup-loop.sh:ro
+      - ./scripts/wal-g-pitr-restore.sh:/usr/local/bin/wal-g-pitr-restore.sh:ro
+      - pg_primary_data:/var/lib/postgresql/primary:ro
+      - pg_standby_data:/var/lib/postgresql/standby:ro
+    depends_on:
+      postgresql-primary:
+        condition: service_healthy
+      postgresql-standby:
+        condition: service_started
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    cpus: 0.5
+    mem_limit: 512m
+    logging: *loki-logging
+
+  # ── API Redis Cluster (Core Engine) ──────────────────────────────────────────
+  redis-api-node-1:
+    image: redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf --cluster-enabled ${REDIS_API_CLUSTER_ENABLED:-no} --requirepass ${REDIS_API_PASSWORD} --masterauth ${REDIS_API_PASSWORD} --cluster-announce-ip 172.19.99.11 --cluster-announce-port 6379 --cluster-announce-bus-port 16379
+    volumes:
+      - redis_api_data_1:/data
+      - ./config/redis/redis-api.conf:/usr/local/etc/redis/redis.conf:ro
+    environment:
+      REDISCLI_AUTH: ${REDIS_API_PASSWORD}
+      REDIS_CLUSTER_ENABLED: ${REDIS_API_CLUSTER_ENABLED:-no}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      backend_net:
+        ipv4_address: 172.19.99.11
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+    cpus: 0.5
+    mem_limit: 1024m
+    logging: *loki-logging
+
+  redis-api-node-2:
+    image: redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf --cluster-enabled ${REDIS_API_CLUSTER_ENABLED:-no} --requirepass ${REDIS_API_PASSWORD} --masterauth ${REDIS_API_PASSWORD} --cluster-announce-ip 172.19.99.12 --cluster-announce-port 6379 --cluster-announce-bus-port 16379
+    volumes:
+      - redis_api_data_2:/data
+      - ./config/redis/redis-api.conf:/usr/local/etc/redis/redis.conf:ro
+    environment:
+      REDISCLI_AUTH: ${REDIS_API_PASSWORD}
+      REDIS_CLUSTER_ENABLED: ${REDIS_API_CLUSTER_ENABLED:-no}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      backend_net:
+        ipv4_address: 172.19.99.12
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+    cpus: 0.5
+    mem_limit: 1024m
+    logging: *loki-logging
+
+  redis-api-node-3:
+    image: redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf --cluster-enabled ${REDIS_API_CLUSTER_ENABLED:-no} --requirepass ${REDIS_API_PASSWORD} --masterauth ${REDIS_API_PASSWORD} --cluster-announce-ip 172.19.99.13 --cluster-announce-port 6379 --cluster-announce-bus-port 16379
+    volumes:
+      - redis_api_data_3:/data
+      - ./config/redis/redis-api.conf:/usr/local/etc/redis/redis.conf:ro
+    environment:
+      REDISCLI_AUTH: ${REDIS_API_PASSWORD}
+      REDIS_CLUSTER_ENABLED: ${REDIS_API_CLUSTER_ENABLED:-no}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      backend_net:
+        ipv4_address: 172.19.99.13
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+    cpus: 0.5
+    mem_limit: 1024m
+    logging: *loki-logging
+
+  redis-api-node-4:
+    image: redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf --cluster-enabled ${REDIS_API_CLUSTER_ENABLED:-no} --requirepass ${REDIS_API_PASSWORD} --masterauth ${REDIS_API_PASSWORD} --cluster-announce-ip 172.19.99.14 --cluster-announce-port 6379 --cluster-announce-bus-port 16379
+    volumes:
+      - redis_api_data_4:/data
+      - ./config/redis/redis-api.conf:/usr/local/etc/redis/redis.conf:ro
+    environment:
+      REDISCLI_AUTH: ${REDIS_API_PASSWORD}
+      REDIS_CLUSTER_ENABLED: ${REDIS_API_CLUSTER_ENABLED:-no}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      backend_net:
+        ipv4_address: 172.19.99.14
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+    cpus: 0.5
+    mem_limit: 1024m
+    logging: *loki-logging
+
+  redis-api-node-5:
+    image: redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf --cluster-enabled ${REDIS_API_CLUSTER_ENABLED:-no} --requirepass ${REDIS_API_PASSWORD} --masterauth ${REDIS_API_PASSWORD} --cluster-announce-ip 172.19.99.15 --cluster-announce-port 6379 --cluster-announce-bus-port 16379
+    volumes:
+      - redis_api_data_5:/data
+      - ./config/redis/redis-api.conf:/usr/local/etc/redis/redis.conf:ro
+    environment:
+      REDISCLI_AUTH: ${REDIS_API_PASSWORD}
+      REDIS_CLUSTER_ENABLED: ${REDIS_API_CLUSTER_ENABLED:-no}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      backend_net:
+        ipv4_address: 172.19.99.15
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+    cpus: 0.5
+    mem_limit: 1024m
+    logging: *loki-logging
+
+  redis-api-node-6:
+    image: redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf --cluster-enabled ${REDIS_API_CLUSTER_ENABLED:-no} --requirepass ${REDIS_API_PASSWORD} --masterauth ${REDIS_API_PASSWORD} --cluster-announce-ip 172.19.99.16 --cluster-announce-port 6379 --cluster-announce-bus-port 16379
+    volumes:
+      - redis_api_data_6:/data
+      - ./config/redis/redis-api.conf:/usr/local/etc/redis/redis.conf:ro
+    environment:
+      REDISCLI_AUTH: ${REDIS_API_PASSWORD}
+      REDIS_CLUSTER_ENABLED: ${REDIS_API_CLUSTER_ENABLED:-no}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      backend_net:
+        ipv4_address: 172.19.99.16
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+    cpus: 0.5
+    mem_limit: 1024m
+    logging: *loki-logging
+
+  redis-api-cluster-creator:
+    image: redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+    container_name: redis-api-cluster-creator
+    depends_on:
+      redis-api-node-1:
+        condition: service_healthy
+      redis-api-node-2:
+        condition: service_healthy
+      redis-api-node-3:
+        condition: service_healthy
+      redis-api-node-4:
+        condition: service_healthy
+      redis-api-node-5:
+        condition: service_healthy
+      redis-api-node-6:
+        condition: service_healthy
+    networks:
+      - backend_net
+    environment:
+      REDIS_CLUSTER_ENABLED: ${REDIS_API_CLUSTER_ENABLED:-no}
+      REDIS_PASSWORD: ${REDIS_API_PASSWORD}
+    command:
+      - sh
+      - -c
+      - |
+        if [ "$$REDIS_CLUSTER_ENABLED" = "yes" ]; then
+          echo "Waiting for all API Redis nodes to be responsive..."
+          for node in redis-api-node-1 redis-api-node-2 redis-api-node-3 redis-api-node-4 redis-api-node-5 redis-api-node-6; do
+            until redis-cli -a "$$REDIS_PASSWORD" -h "$$node" ping | grep -q PONG; do
+              echo "Waiting for $$node..."
+              sleep 1
+            done
+            echo "$$node is up!"
+          done
+
+          echo "All API Redis nodes are responsive. Checking cluster state..."
+          sleep 2
+
+          # Check if cluster is already healthy and all 16384 slots are covered
+          if redis-cli -a "$$REDIS_PASSWORD" -h redis-api-node-1 cluster info 2>/dev/null | grep -q 'cluster_state:ok'; then
+            echo "API Redis Cluster already exists and is healthy (cluster_state:ok). No action required."
+            exit 0
+          fi
+
+          echo "Cluster not healthy or not initialized. Checking if nodes are unconfigured..."
+          UNCONFIGURED=1
+          for node in redis-api-node-1 redis-api-node-2 redis-api-node-3 redis-api-node-4 redis-api-node-5 redis-api-node-6; do
+            KNOWN=$$(redis-cli -a "$$REDIS_PASSWORD" -h "$$node" cluster info 2>/dev/null | awk -F: '$$1 == "cluster_known_nodes" {print $$2}' | tr -d '\r')
+            SLOTS=$$(redis-cli -a "$$REDIS_PASSWORD" -h "$$node" cluster info 2>/dev/null | awk -F: '$$1 == "cluster_slots_assigned" {print $$2}' | tr -d '\r')
+            if [ "$$KNOWN" != "1" ] || [ "$$SLOTS" != "0" ]; then
+              UNCONFIGURED=0
+              break
+            fi
+          done
+
+          if [ "$$UNCONFIGURED" = "1" ]; then
+            echo "All 6 nodes are clean and unconfigured. Initializing API Redis Cluster..."
+            redis-cli -a "$$REDIS_PASSWORD" --cluster create \
+              redis-api-node-1:6379 redis-api-node-2:6379 redis-api-node-3:6379 \
+              redis-api-node-4:6379 redis-api-node-5:6379 redis-api-node-6:6379 \
+              --cluster-replicas 1 --cluster-yes
+          else
+            echo "Nodes have existing cluster state. Attempting non-destructive cluster fix..."
+            redis-cli -a "$$REDIS_PASSWORD" --cluster fix redis-api-node-1:6379 --cluster-yes || true
+          fi
+
+          sleep 3
+          # Health verification exit gate
+          STATE=$$(redis-cli -a "$$REDIS_PASSWORD" -h redis-api-node-1 cluster info 2>/dev/null | awk -F: '$$1 == "cluster_state" {print $$2}' | tr -d '\r')
+          SLOTS_OK=$$(redis-cli -a "$$REDIS_PASSWORD" -h redis-api-node-1 cluster info 2>/dev/null | awk -F: '$$1 == "cluster_slots_ok" {print $$2}' | tr -d '\r')
+          KNOWN=$$(redis-cli -a "$$REDIS_PASSWORD" -h redis-api-node-1 cluster info 2>/dev/null | awk -F: '$$1 == "cluster_known_nodes" {print $$2}' | tr -d '\r')
+
+          if [ "$$STATE" = "ok" ] && [ "$$SLOTS_OK" = "16384" ] && [ "$$KNOWN" = "6" ]; then
+            echo "API Redis Cluster verified successfully: state=ok, slots=16384, nodes=6."
+            exit 0
+          else
+            echo "ERROR: API Redis Cluster verification failed! state=$$STATE, slots=$$SLOTS_OK, nodes=$$KNOWN" >&2
+            exit 1
+          fi
+        else
+          echo "API Redis Cluster mode disabled. Skipping cluster creation."
+        fi
+
+  # ── UI Redis Cluster (Dashboard Sessions, Rate Limiting, 2FA) ───────────────
+  redis-ui-node-1:
+    image: redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf --requirepass ${REDIS_UI_PASSWORD} --masterauth ${REDIS_UI_PASSWORD}
+    volumes:
+      - redis_ui_data_1:/data
+      - ./config/redis/redis-ui.conf:/usr/local/etc/redis/redis.conf:ro
+    environment:
+      REDISCLI_AUTH: ${REDIS_UI_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      backend_net:
+        ipv4_address: 172.19.99.21
+    deploy:
+      resources:
+        limits:
+          cpus: '0.3'
+          memory: 512M
+    cpus: 0.3
+    mem_limit: 512m
+    logging: *loki-logging
+
+  redis-ui-node-2:
+    image: redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf --replicaof redis-ui-node-1 6379 --requirepass ${REDIS_UI_PASSWORD} --masterauth ${REDIS_UI_PASSWORD}
+    volumes:
+      - redis_ui_data_2:/data
+      - ./config/redis/redis-ui.conf:/usr/local/etc/redis/redis.conf:ro
+    environment:
+      REDISCLI_AUTH: ${REDIS_UI_PASSWORD}
+    depends_on:
+      redis-ui-node-1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      backend_net:
+        ipv4_address: 172.19.99.22
+    deploy:
+      resources:
+        limits:
+          cpus: '0.3'
+          memory: 512M
+    cpus: 0.3
+    mem_limit: 512m
+    logging: *loki-logging
+
+  redisinsight:
+    image: redis/redisinsight:3.4.2@sha256:85562d67a9128ac7f764bb3d1ac909fcf77708c7c8f55bd1605a85b3c4becc83
+    restart: unless-stopped
+    environment:
+      RI_PROXY_PATH: /
+    volumes:
+      - redisinsight_data:/data
+    depends_on:
+      - redis-api-node-1
+      - redis-ui-node-1
+    networks:
+      - public_net
+      - backend_net
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=public_net'
+      - 'traefik.http.services.redisinsight.loadbalancer.server.port=5540'
+      - 'traefik.http.routers.redisinsight.middlewares=basic-auth@docker'
+    logging: *loki-logging
+
+  quasar-app:
+    build:
+      context: ..
+      dockerfile: infra/dockerfiles/Dockerfile.app
+      args:
+        NEXT_PUBLIC_SERVER_URL: ${NEXT_PUBLIC_SERVER_URL}
+        NEXT_PUBLIC_ENGINE_URL: ${NEXT_PUBLIC_ENGINE_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN}
+        SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN}
+        SENTRY_ORG: ${SENTRY_ORG:-}
+        SENTRY_PROJECT_DASHBOARD: ${SENTRY_PROJECT_DASHBOARD:-}
+        SENTRY_RELEASE: ${SENTRY_RELEASE:-latest}
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      NODE_ENV: production
+      HOSTNAME: '0.0.0.0'
+      PORT: '3000'
+      REDIS_UI_URL: ${REDIS_UI_URL}
+      REDIS_UI_MODE: ${REDIS_UI_MODE:-single}
+      SEED_BILLING_WEBHOOK_URL: ${SEED_BILLING_WEBHOOK_URL:-}
+      SEED_PAYMENT_WALLET_ADDRESS: ${SEED_PAYMENT_WALLET_ADDRESS:-}
+      PIMLICO_API_KEY: ${PIMLICO_API_KEY:-}
+      REDIS_API_URL: ${REDIS_API_URL}
+      REDIS_API_MODE: ${REDIS_API_MODE:-cluster}
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL_READ: ${DATABASE_URL_READ}
+      INTERNAL_ENGINE_URL: ${INTERNAL_ENGINE_URL:-http://quasar-nest-api:3001}
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/apps/dashboard/.next/cache
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis-api-node-1:
+        condition: service_healthy
+      redis-ui-node-1:
+        condition: service_healthy
+      redis-api-cluster-creator:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD', 'curl', '-sf', 'http://127.0.0.1:3000/api/health/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - backend_net
+      - public_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    logging: *loki-logging
+
+  quasar-nest-api:
+    build:
+      context: ..
+      dockerfile: infra/dockerfiles/Dockerfile.nest
+      args:
+        SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN}
+        SENTRY_ORG: ${SENTRY_ORG:-}
+        SENTRY_PROJECT_ENGINE: ${SENTRY_PROJECT_ENGINE:-}
+        SENTRY_RELEASE: ${SENTRY_RELEASE:-latest}
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      NODE_ENV: production
+      PORT: '3001'
+      REDIS_API_URL: ${REDIS_API_URL}
+      REDIS_API_MODE: ${REDIS_API_MODE:-cluster}
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL_READ: ${DATABASE_URL_READ}
+      ENABLE_WORKERS: 'false'
+      PIMLICO_API_KEY: ${PIMLICO_API_KEY:-}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis-api-node-1:
+        condition: service_healthy
+      redis-api-cluster-creator:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://127.0.0.1:3001/v1/engine/monitoring/health']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - public_net
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    logging: *loki-logging
+
+  quasar-worker:
+    build:
+      context: ..
+      dockerfile: infra/dockerfiles/Dockerfile.nest
+      args:
+        SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN}
+        SENTRY_ORG: ${SENTRY_ORG:-}
+        SENTRY_PROJECT_ENGINE: ${SENTRY_PROJECT_ENGINE:-}
+        SENTRY_RELEASE: ${SENTRY_RELEASE:-latest}
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      NODE_ENV: production
+      PORT: '3001'
+      REDIS_API_URL: ${REDIS_API_URL}
+      REDIS_API_MODE: ${REDIS_API_MODE:-cluster}
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL_READ: ${DATABASE_URL_READ}
+      ENABLE_WORKERS: 'true'
+      PIMLICO_API_KEY: ${PIMLICO_API_KEY:-}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis-api-node-1:
+        condition: service_healthy
+      redis-api-cluster-creator:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://127.0.0.1:3001/v1/engine/monitoring/health']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    logging: *loki-logging
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: infra/dockerfiles/Dockerfile.app
+      target: builder
+      args:
+        NEXT_PUBLIC_SERVER_URL: ${NEXT_PUBLIC_SERVER_URL}
+        NEXT_PUBLIC_ENGINE_URL: ${NEXT_PUBLIC_ENGINE_URL}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN}
+        SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN}
+        SENTRY_ORG: ${SENTRY_ORG:-}
+        SENTRY_PROJECT_DASHBOARD: ${SENTRY_PROJECT_DASHBOARD:-}
+        SENTRY_RELEASE: ${SENTRY_RELEASE:-latest}
+    profiles:
+      - utility
+    command: pnpm --filter @tuwaio/quasar payload migrate
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      PIMLICO_API_KEY: ${PIMLICO_API_KEY:-}
+      REDIS_API_URL: ${REDIS_API_URL}
+      REDIS_API_MODE: ${REDIS_API_MODE:-cluster}
+      REDIS_UI_URL: ${REDIS_UI_URL}
+      REDIS_UI_MODE: ${REDIS_UI_MODE:-single}
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+    networks:
+      - backend_net
+
+  prometheus:
+    image: prom/prometheus:v3.11.3@sha256:e4254400b85610324913f0dc4acf92603d9984e7519414c5a12811aa6146acc3
+    restart: unless-stopped
+    user: 'nobody'
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=10d'
+      - '--storage.tsdb.retention.size=10GB'
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    depends_on:
+      docker-proxy:
+        condition: service_started
+      node-exporter:
+        condition: service_started
+      cadvisor:
+        condition: service_started
+      postgres-exporter-primary:
+        condition: service_started
+      postgres-exporter-standby:
+        condition: service_started
+      pgbouncer-exporter:
+        condition: service_started
+      redis-exporter-api:
+        condition: service_started
+      redis-exporter-ui:
+        condition: service_started
+      blackbox-exporter:
+        condition: service_started
+      cloudflared:
+        condition: service_started
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    logging: *loki-logging
+
+  grafana:
+    image: grafana/grafana:11.6.0@sha256:62d2b9d20a19714ebfe48d1bb405086081bc602aa053e28cf6d73c7537640dfb
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_SERVER_ROOT_URL: 'https://grafana.${DOMAIN}'
+      # Provisioning is rendered at container start into a writable path
+      # (see entrypoint below) because /etc/grafana/provisioning-templates
+      # is mounted read-only and the alerting contact point is generated
+      # from DISCORD_WEBHOOK_URL/TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID.
+      # Dashboard JSON is the exception: it is read straight from the
+      # read-only mount, so it never goes stale after a deploy.
+      GF_PATHS_PROVISIONING: /tmp/grafana-provisioning
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning-templates:ro
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        mkdir -p /tmp/grafana-provisioning/dashboards /tmp/grafana-provisioning/datasources /tmp/grafana-provisioning/alerting
+        # Only the provider file is rendered here. The dashboard JSON is read
+        # in place from the read-only mount - see the path in dashboards.yml.
+        cp /etc/grafana/provisioning-templates/dashboards/dashboards.yml /tmp/grafana-provisioning/dashboards/
+        cp -r /etc/grafana/provisioning-templates/datasources/. /tmp/grafana-provisioning/datasources/
+
+        # Grafana does not fail on a provider path that holds no dashboards:
+        # it logs "Cannot read directory" every 30s and serves an empty list.
+        # That is how every dashboard went missing unnoticed once, so a wrong
+        # or empty path stops the container here instead.
+        DASHBOARDS_DIR=$$(sed -n 's/^ *path: *//p' /tmp/grafana-provisioning/dashboards/dashboards.yml)
+        if ! ls "$$DASHBOARDS_DIR"/*.json >/dev/null 2>&1; then
+          echo "[Grafana] ERROR: dashboards.yml points at '$$DASHBOARDS_DIR', which holds no *.json dashboards." >&2
+          exit 1
+        fi
+
+        RECEIVERS=""
+        if [ -n "$$DISCORD_WEBHOOK_URL" ]; then
+          RECEIVERS="$$RECEIVERS$$(printf '\n      - uid: notify-discord\n        type: discord\n        settings:\n          url: "%s"' "$$DISCORD_WEBHOOK_URL")"
+        fi
+        if [ -n "$$TELEGRAM_BOT_TOKEN" ] && [ -n "$$TELEGRAM_CHAT_ID" ]; then
+          RECEIVERS="$$RECEIVERS$$(printf '\n      - uid: notify-telegram\n        type: telegram\n        settings:\n          bottoken: "%s"\n          chatid: "%s"' "$$TELEGRAM_BOT_TOKEN" "$$TELEGRAM_CHAT_ID")"
+        fi
+        # Grafana is a dashboards tool first: a missing alert channel degrades
+        # alerting instead of blocking startup. The loud "you forgot to
+        # configure ops alerting" signal is the alertmanager service, which
+        # does refuse to start without a channel - it has no other purpose.
+        if [ -n "$$RECEIVERS" ]; then
+          cp /etc/grafana/provisioning-templates/alerting/policies.yml /tmp/grafana-provisioning/alerting/policies.yml
+          {
+            echo "apiVersion: 1"
+            echo ""
+            echo "contactPoints:"
+            echo "  - orgId: 1"
+            echo "    name: Notify"
+            echo "    receivers:"
+            printf '%s\n' "$$RECEIVERS"
+          } > /tmp/grafana-provisioning/alerting/contact-points.yml
+        else
+          echo "[Grafana] WARNING: no DISCORD_WEBHOOK_URL / TELEGRAM_BOT_TOKEN set - dashboards will work, alert notifications are disabled." >&2
+        fi
+
+        exec /run.sh
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - backend_net
+      - public_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=public_net'
+      - 'traefik.http.services.grafana.loadbalancer.server.port=3000'
+    logging: *loki-logging
+
+  loki:
+    image: grafana/loki:3.6.11@sha256:44148ad243c07957113baea950ee5ba9b0c8eff8d7e38ff3cc1c0af705790945
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    ports:
+      - '127.0.0.1:3101:3100'
+    volumes:
+      - ./config/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ./config/loki/rules:/loki/rules:ro
+      - loki_data:/loki
+    networks:
+      - backend_net
+
+  promtail:
+    image: grafana/promtail:3.6.11@sha256:a761cb834cfaeee29745440d4884d6748f0a08d8f68928db1d707018c1dcfbe9
+    user: root
+    environment:
+      - DOCKER_HOST=tcp://docker-proxy:2375
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./config/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - promtail_data:/data
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - backend_net
+    depends_on:
+      - loki
+      - docker-proxy
+
+  node-exporter:
+    image: prom/node-exporter:v1.11.1@sha256:e9cff4fc67b1818f8c97adb115b9f12c9a54b533de86765d4a0effc01b357205
+    restart: unless-stopped
+    privileged: true
+    group_add:
+      - root
+    pid: host
+    command:
+      - '--path.rootfs=/host'
+      - '--no-collector.powersupplyclass'
+    volumes:
+      - /:/host:ro
+    networks:
+      - backend_net
+
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.57.0@sha256:e75bdb03b74b0b6995f208f166fead2e6e555dde73e44200113bb26f41b1981d
+    restart: unless-stopped
+    privileged: true
+    command:
+      - '-docker_only=true'
+      - '-disable_root_cgroup_stats=true'
+      - '-housekeeping_interval=15s'
+      - '-disable_metrics=tcp,udp,percpu,sched,process,referenced_memory'
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro,rslave
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /run/containerd:/run/containerd:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - backend_net
+
+  postgres-exporter-primary:
+    image: prometheuscommunity/postgres-exporter:v0.19.1@sha256:e96064f876226d94bb6ce48a4c4b3dd76edba91168ec1ab024e5c4b959310b0f
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: 'postgresql://${PG_USER}:${PG_PASSWORD}@postgresql-primary:5432/${PG_DB}?sslmode=disable'
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: 'true'
+    depends_on:
+      postgresql-primary:
+        condition: service_healthy
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    logging: *loki-logging
+
+  postgres-exporter-standby:
+    image: prometheuscommunity/postgres-exporter:v0.19.1@sha256:e96064f876226d94bb6ce48a4c4b3dd76edba91168ec1ab024e5c4b959310b0f
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: 'postgresql://${PG_USER}:${PG_PASSWORD}@postgresql-standby:5432/${PG_DB}?sslmode=disable'
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: 'true'
+    depends_on:
+      postgresql-standby:
+        condition: service_healthy
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    logging: *loki-logging
+
+  redis-exporter-api:
+    image: oliver006/redis_exporter:v1.83.0@sha256:e8c209894d4c0cc55b1259ddd47e0b769ad1ff864b356736ee885462a3b0e48c
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis-api-node-1:6379
+      REDIS_PASSWORD: ${REDIS_API_PASSWORD}
+      REDIS_IS_CLUSTER: ${REDIS_API_CLUSTER_ENABLED:-no}
+    depends_on:
+      redis-api-node-1:
+        condition: service_healthy
+      redis-api-node-2:
+        condition: service_healthy
+      redis-api-node-3:
+        condition: service_healthy
+      redis-api-node-4:
+        condition: service_healthy
+      redis-api-node-5:
+        condition: service_healthy
+      redis-api-node-6:
+        condition: service_healthy
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 256M
+    logging: *loki-logging
+
+  redis-exporter-ui:
+    image: oliver006/redis_exporter:v1.83.0@sha256:e8c209894d4c0cc55b1259ddd47e0b769ad1ff864b356736ee885462a3b0e48c
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis-ui-node-1:6379
+      REDIS_PASSWORD: ${REDIS_UI_PASSWORD}
+    depends_on:
+      redis-ui-node-1:
+        condition: service_healthy
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 256M
+    logging: *loki-logging
+
+  pgbouncer-exporter:
+    image: prometheuscommunity/pgbouncer-exporter:v0.8.0@sha256:fcdc7b20addb870f20570d8fc63cc5be20c37d1b90ab2887c80cd5f883a53e91
+    restart: unless-stopped
+    command:
+      - '--pgBouncer.connectionString=postgresql://${PG_USER}:${PG_PASSWORD}@pgbouncer:5432/pgbouncer?sslmode=disable'
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 256M
+    logging: *loki-logging
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.2.0@sha256:404528c1cd63c3eb882c257ae524919e4376115e6fe57befca8d603656a91a4c
+    restart: unless-stopped
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    command: --no-autoupdate --metrics 0.0.0.0:2000 tunnel run
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 256M
+    logging: *loki-logging
+
+  cloudflared-2:
+    image: cloudflare/cloudflared:2026.2.0@sha256:404528c1cd63c3eb882c257ae524919e4376115e6fe57befca8d603656a91a4c
+    restart: unless-stopped
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    command: --no-autoupdate --metrics 0.0.0.0:2000 tunnel run
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 256M
+    logging: *loki-logging
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.28.0@sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc
+    restart: unless-stopped
+    volumes:
+      - ./config/blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 256M
+    cpus: 0.2
+    mem_limit: 256m
+    logging: *loki-logging
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0@sha256:d5155cfac40a6d9250ffc97c19db2c5e190c7bc57c6b67125c94903358f8c7d8
+    restart: unless-stopped
+    environment:
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - ./config/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml.template:ro
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        NOTIFY_CONFIGS=""
+        if [ -n "$$DISCORD_WEBHOOK_URL" ]; then
+          NOTIFY_CONFIGS="$$NOTIFY_CONFIGS$$(printf '\n    discord_configs:\n      - webhook_url: "%s"\n        send_resolved: true' "$$DISCORD_WEBHOOK_URL")"
+        fi
+        if [ -n "$$TELEGRAM_BOT_TOKEN" ] && [ -n "$$TELEGRAM_CHAT_ID" ]; then
+          NOTIFY_CONFIGS="$$NOTIFY_CONFIGS$$(printf '\n    telegram_configs:\n      - bot_token: "%s"\n        chat_id: "%s"\n        send_resolved: true' "$$TELEGRAM_BOT_TOKEN" "$$TELEGRAM_CHAT_ID")"
+        fi
+        if [ -z "$$NOTIFY_CONFIGS" ]; then
+          echo "[Alertmanager] FATAL: set DISCORD_WEBHOOK_URL and/or TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID." >&2
+          exit 1
+        fi
+        while IFS= read -r line || [ -n "$$line" ]; do
+          case "$$line" in
+            *__NOTIFY_RECEIVER_CONFIGS__*) printf '%s\n' "$$NOTIFY_CONFIGS" ;;
+            *) printf '%s\n' "$$line" ;;
+          esac
+        done < /etc/alertmanager/alertmanager.yml.template > /tmp/alertmanager.yml
+        exec /bin/alertmanager --config.file=/tmp/alertmanager.yml
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 256M
+    cpus: 0.2
+    mem_limit: 256m
+    logging: *loki-logging
+
+networks:
+  backend_net:
+    name: backend_net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.19.99.0/24
+          ip_range: 172.19.99.128/25
+  public_net:
+    name: public_net
+    driver: bridge
+
+volumes:
+  traefik_auth:
+  pg_primary_data:
+  pg_standby_data:
+  pg_backups:
+  pgadmin_data:
+  redis_api_data_1:
+  redis_api_data_2:
+  redis_api_data_3:
+  redis_api_data_4:
+  redis_api_data_5:
+  redis_api_data_6:
+  redis_ui_data_1:
+  redis_ui_data_2:
+  redisinsight_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  promtail_data:

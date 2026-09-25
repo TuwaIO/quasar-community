@@ -1,0 +1,30 @@
+node_modules
+**/node_modules
+.pnpm-store
+.git
+.env*
+!.env.example
+.next
+**/.next
+dist
+**/dist
+build
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE / Editor
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS related
+.DS_Store
+Thumbs.db
+
+# Documentation
+README.md
+LICENSE
+AGENTS.md
+docs

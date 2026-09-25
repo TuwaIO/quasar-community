@@ -1,0 +1,22 @@
+groups:
+  - name: backup_alerts
+    rules:
+      - alert: PostgresBackupFailed
+        expr: |
+          sum by (container_name) (count_over_time({container_name=~".*pg-backup.*"} |~ "(?i)(error|fail|cannot|unable)" [5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Postgres Backup Failure'
+          description: 'S3 PostgreSQL backup failed in container {{ $labels.container_name }}. Review pg-backup logs immediately.'
+      - alert: WALGBackupFailed
+        expr: |
+          sum by (container_name) (count_over_time({container_name=~".*wal-g-backup.*"} |~ "(?i)(error|fail|no writable|missing)" [10m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          category: backup
+        annotations:
+          summary: 'WAL-G base backup failed'
+          description: 'The WAL-G base-backup scheduler reported a failure in {{ $labels.container_name }}. Review scheduler and PostgreSQL logs.'

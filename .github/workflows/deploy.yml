@@ -1,0 +1,532 @@
+name: Deploy Quasar
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  quality-check:
+    name: Check or Run Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Check if CI has already passed on PR
+        id: check-ci
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Checking if CI Quality Gate passed for this commit or its PR..."
+
+          RUN_INFO=$(gh run list --repo ${{ github.repository }} --commit ${{ github.sha }} --workflow "CI Quality Gate" --json status,conclusion --limit 1 2>/dev/null || echo "[]")
+          STATUS=$(echo "$RUN_INFO" | jq -r '.[0].status // empty')
+          CONCLUSION=$(echo "$RUN_INFO" | jq -r '.[0].conclusion // empty')
+
+          if [ "$STATUS" = "completed" ] && [ "$CONCLUSION" = "success" ]; then
+            echo "CI Quality Gate already passed for this commit!"
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          PR_NUMBER=$(gh api "search/issues?q=repo:${{ github.repository }}+is:pr+is:merged+sha:${{ github.sha }}" --jq '.items[0].number // empty' 2>/dev/null || echo "")
+
+          if [ -n "$PR_NUMBER" ]; then
+            echo "Commit is part of merged PR #${PR_NUMBER}. Checking PR source commit..."
+            SOURCE_SHA=$(gh pr view "$PR_NUMBER" --repo ${{ github.repository }} --json commits --jq '.commits[-1].oid // empty' 2>/dev/null || echo "")
+            if [ -n "$SOURCE_SHA" ]; then
+              echo "PR source commit: $SOURCE_SHA"
+              RUN_INFO=$(gh run list --repo ${{ github.repository }} --commit "$SOURCE_SHA" --workflow "CI Quality Gate" --json status,conclusion --limit 1 2>/dev/null || echo "[]")
+              STATUS=$(echo "$RUN_INFO" | jq -r '.[0].status // empty')
+              CONCLUSION=$(echo "$RUN_INFO" | jq -r '.[0].conclusion // empty')
+
+              if [ "$STATUS" = "completed" ] && [ "$CONCLUSION" = "success" ]; then
+                echo "CI Quality Gate already passed for PR source commit $SOURCE_SHA!"
+                echo "skip=true" >> $GITHUB_OUTPUT
+                exit 0
+              fi
+            fi
+          fi
+
+          echo "No successful CI Quality Gate run found. Quality checks will be executed in this job."
+          echo "skip=false" >> $GITHUB_OUTPUT
+
+      - name: Install pnpm
+        if: steps.check-ci.outputs.skip != 'true'
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Setup Node.js
+        if: steps.check-ci.outputs.skip != 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        if: steps.check-ci.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Shared Packages
+        if: steps.check-ci.outputs.skip != 'true'
+        run: pnpm --filter @tuwaio/shared build
+
+      - name: Run Linter
+        if: steps.check-ci.outputs.skip != 'true'
+        run: pnpm lint
+
+      - name: Typecheck
+        if: steps.check-ci.outputs.skip != 'true'
+        run: pnpm typecheck
+
+      - name: Run Tests
+        if: steps.check-ci.outputs.skip != 'true'
+        run: pnpm test
+
+      # Licensed action or keyless CLI — same scanner, same .gitleaks.toml,
+      # both blocking. Rationale in ci.yml.
+      - name: Detect Gitleaks license
+        id: gitleaks
+        if: steps.check-ci.outputs.skip != 'true'
+        env:
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        run: echo "licensed=$([ -n "$GITLEAKS_LICENSE" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Run Gitleaks Secret Scanner
+        if: steps.check-ci.outputs.skip != 'true' && steps.gitleaks.outputs.licensed == 'true'
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+      - name: Run Gitleaks Secret Scanner (CLI, no license)
+        if: steps.check-ci.outputs.skip != 'true' && steps.gitleaks.outputs.licensed != 'true'
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/repo" \
+            zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git /repo --redact --no-banner --exit-code 1
+
+      # Cloud policy with a token, public p/default ruleset without one; a
+      # finding fails the job either way. Rationale in ci.yml.
+      - name: Run Semgrep Security Scan
+        if: steps.check-ci.outputs.skip != 'true'
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        run: |
+          if [ -n "$SEMGREP_APP_TOKEN" ]; then
+            SEMGREP_ARGS=(ci)
+          else
+            echo "::notice::SEMGREP_APP_TOKEN is not set; scanning with the public p/default ruleset."
+            SEMGREP_ARGS=(scan --config p/default --error --metrics=off)
+          fi
+          docker run --rm -v "${{ github.workspace }}:/src" \
+            -e SEMGREP_APP_TOKEN \
+            semgrep/semgrep:1.157.0 semgrep "${SEMGREP_ARGS[@]}"
+
+  build-app:
+    name: Build App & Migrate Images
+    needs: quality-check
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    outputs:
+      app_digest: ${{ steps.build-app.outputs.digest }}
+      migrate_digest: ${{ steps.build-migrate.outputs.digest }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Prepare Repo Name
+        id: repo
+        run: |
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_OUTPUT
+          # GHCR packages belong to the OWNER, not the repository, so a
+          # hardcoded `quasar-app` would have the synced community repository
+          # writing into this repository's package - and its GITHUB_TOKEN is not
+          # allowed to, so its very first CI run would fail on a name it never
+          # chose. Deriving the base from the repository name gives every copy
+          # its own package: `quasar` here, `quasar-community` there, and their
+          # own name in anyone's fork.
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+          echo "image_base=${REPO_NAME,,}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate in-image release metadata
+        run: |
+          ROLLBACK_SAFE=true
+          for migration in apps/dashboard/src/migrations/*.ts; do
+            if [ -f "$migration" ] && [ "$(basename "$migration")" != "index.ts" ]; then
+              if ! grep -q "export async function down" "$migration"; then
+                echo "Warning: Migration $migration does not have a down() function. Setting rollback_safe=false."
+                ROLLBACK_SAFE=false
+                break
+              fi
+            fi
+          done
+          jq -n \
+            --arg commit "${{ github.sha }}" \
+            --arg workflow "${{ github.workflow_ref }}" \
+            --argjson rollback_safe "$ROLLBACK_SAFE" \
+            '{schema_version: 1, commit: $commit, workflow: $workflow, db_migration: "latest", rollback_safe: $rollback_safe}' \
+            > release-manifest.json
+
+      - name: Build and Push App Image
+        id: build-app
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: infra/dockerfiles/Dockerfile.app
+          push: true
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.owner }}/${{ steps.repo.outputs.image_base }}-app:${{ github.ref_name }}
+            ghcr.io/${{ steps.repo.outputs.owner }}/${{ steps.repo.outputs.image_base }}-app:${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            NEXT_PUBLIC_SERVER_URL=${{ vars.NEXT_PUBLIC_SERVER_URL }}
+            NEXT_PUBLIC_ENGINE_URL=${{ vars.NEXT_PUBLIC_ENGINE_URL }}
+            NEXT_PUBLIC_APP_URL=${{ vars.NEXT_PUBLIC_APP_URL }}
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
+
+      - name: Build and Push Migrate Image
+        id: build-migrate
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: infra/dockerfiles/Dockerfile.app
+          target: builder
+          push: true
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.owner }}/${{ steps.repo.outputs.image_base }}-migrate:${{ github.ref_name }}
+            ghcr.io/${{ steps.repo.outputs.owner }}/${{ steps.repo.outputs.image_base }}-migrate:${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            NEXT_PUBLIC_SERVER_URL=${{ vars.NEXT_PUBLIC_SERVER_URL }}
+            NEXT_PUBLIC_ENGINE_URL=${{ vars.NEXT_PUBLIC_ENGINE_URL }}
+            NEXT_PUBLIC_APP_URL=${{ vars.NEXT_PUBLIC_APP_URL }}
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
+
+      - name: Scan for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_DISABLE_VEX_NOTICE: 'true'
+        with:
+          image-ref: ghcr.io/${{ steps.repo.outputs.owner }}/${{ steps.repo.outputs.image_base }}-app:${{ github.sha }}
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          trivyignores: .trivyignore
+          scanners: 'vuln'
+
+      - name: Generate SBOM for App
+        id: sbom-app
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ghcr.io/${{ steps.repo.outputs.owner }}/${{ steps.repo.outputs.image_base }}-app:${{ github.sha }}
+          artifact-name: sbom-quasar-app.spdx.json
+          output-file: sbom-quasar-app.spdx.json
+
+      - name: Verify App SBOM artifact
+        run: test -s sbom-quasar-app.spdx.json
+
+  build-nest:
+    name: Build Nest Image
+    needs: quality-check
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    outputs:
+      nest_digest: ${{ steps.build-nest.outputs.digest }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Prepare Repo Name
+        id: repo
+        run: |
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_OUTPUT
+          # GHCR packages belong to the OWNER, not the repository, so a
+          # hardcoded `quasar-app` would have the synced community repository
+          # writing into this repository's package - and its GITHUB_TOKEN is not
+          # allowed to, so its very first CI run would fail on a name it never
+          # chose. Deriving the base from the repository name gives every copy
+          # its own package: `quasar` here, `quasar-community` there, and their
+          # own name in anyone's fork.
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+          echo "image_base=${REPO_NAME,,}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push
+        id: build-nest
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: infra/dockerfiles/Dockerfile.nest
+          push: true
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.owner }}/${{ steps.repo.outputs.image_base }}-nest:${{ github.ref_name }}
+            ghcr.io/${{ steps.repo.outputs.owner }}/${{ steps.repo.outputs.image_base }}-nest:${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Scan for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/${{ steps.repo.outputs.owner }}/${{ steps.repo.outputs.image_base }}-nest:${{ github.sha }}
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          trivyignores: .trivyignore
+          scanners: 'vuln'
+
+      - name: Generate SBOM for Nest
+        id: sbom-nest
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ghcr.io/${{ steps.repo.outputs.owner }}/${{ steps.repo.outputs.image_base }}-nest:${{ github.sha }}
+          artifact-name: sbom-quasar-nest.spdx.json
+          output-file: sbom-quasar-nest.spdx.json
+
+      - name: Verify Nest SBOM artifact
+        run: test -s sbom-quasar-nest.spdx.json
+
+  release-security:
+    name: Sign and verify release artifacts
+    needs: [build-app, build-nest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      app_image: ${{ steps.release.outputs.app_image }}
+      nest_image: ${{ steps.release.outputs.nest_image }}
+      migrate_image: ${{ steps.release.outputs.migrate_image }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Prepare repository owner
+        id: repo
+        run: |
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          # Same reasoning as the build jobs: see the comment there.
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+          echo "image_base=${REPO_NAME,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare immutable image references
+        id: release
+        env:
+          OWNER: ${{ steps.repo.outputs.owner }}
+          IMAGE_BASE: ${{ steps.repo.outputs.image_base }}
+          APP_DIGEST: ${{ needs.build-app.outputs.app_digest }}
+          NEST_DIGEST: ${{ needs.build-nest.outputs.nest_digest }}
+          MIGRATE_DIGEST: ${{ needs.build-app.outputs.migrate_digest }}
+        run: |
+          OWNER_LOWER=$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')
+          for digest in "$APP_DIGEST" "$NEST_DIGEST" "$MIGRATE_DIGEST"; do
+            if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              echo "ERROR: Buildx did not return a full sha256 digest."
+              exit 1
+            fi
+          done
+          echo "app_image=ghcr.io/${OWNER_LOWER}/${IMAGE_BASE}-app@${APP_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "nest_image=ghcr.io/${OWNER_LOWER}/${IMAGE_BASE}-nest@${NEST_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "migrate_image=ghcr.io/${OWNER_LOWER}/${IMAGE_BASE}-migrate@${MIGRATE_DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v2.4.3
+
+      - name: Log in to GHCR for signing
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Sign immutable application images
+        env:
+          APP_IMAGE: ${{ steps.release.outputs.app_image }}
+          NEST_IMAGE: ${{ steps.release.outputs.nest_image }}
+          MIGRATE_IMAGE: ${{ steps.release.outputs.migrate_image }}
+          GIT_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          for image in "$APP_IMAGE" "$NEST_IMAGE" "$MIGRATE_IMAGE"; do
+            cosign sign --yes -a git_sha="$GIT_SHA" -a repository="$REPOSITORY" "$image"
+          done
+
+      - name: Verify immutable image signatures
+        env:
+          APP_IMAGE: ${{ steps.release.outputs.app_image }}
+          NEST_IMAGE: ${{ steps.release.outputs.nest_image }}
+          MIGRATE_IMAGE: ${{ steps.release.outputs.migrate_image }}
+          GIT_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          CERTIFICATE_IDENTITY="https://github.com/${REPOSITORY}/.github/workflows/deploy.yml@refs/heads/${REF_NAME}"
+          for image in "$APP_IMAGE" "$NEST_IMAGE" "$MIGRATE_IMAGE"; do
+            cosign verify \
+              --certificate-identity "$CERTIFICATE_IDENTITY" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              -a git_sha="$GIT_SHA" \
+              -a repository="$REPOSITORY" \
+              "$image" >/dev/null
+          done
+
+      - name: Create and sign release manifest
+        env:
+          APP_IMAGE: ${{ steps.release.outputs.app_image }}
+          NEST_IMAGE: ${{ steps.release.outputs.nest_image }}
+          MIGRATE_IMAGE: ${{ steps.release.outputs.migrate_image }}
+          GIT_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          jq -n \
+            --arg commit "$GIT_SHA" \
+            --arg repository "$REPOSITORY" \
+            --arg workflow "$WORKFLOW_REF" \
+            --arg run_id "$RUN_ID" \
+            --arg app "$APP_IMAGE" \
+            --arg nest "$NEST_IMAGE" \
+            --arg migrate "$MIGRATE_IMAGE" \
+            '{schema_version: 1, commit: $commit, repository: $repository, workflow: $workflow, run_id: $run_id, images: {app: $app, nest: $nest, migrate: $migrate}}' \
+            > release-manifest.json
+          cosign sign-blob --yes --bundle release-manifest.sigstore.json release-manifest.json
+          cosign verify-blob \
+            --bundle release-manifest.sigstore.json \
+            --certificate-identity "https://github.com/${REPOSITORY}/.github/workflows/deploy.yml@refs/heads/${GITHUB_REF_NAME}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            release-manifest.json >/dev/null
+
+      - name: Upload signed release manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-manifest-${{ github.sha }}
+          path: |
+            release-manifest.json
+            release-manifest.sigstore.json
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to ${{ github.ref_name }}
+    needs: release-security
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production-deploy' || 'staging-deploy' }}
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Prepare Repo Name
+        id: repo
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_OUTPUT
+
+      - name: Debug Host Length
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          PROD_HOST: ${{ secrets.PROD_SSH_HOST }}
+          STG_HOST: ${{ secrets.STAGING_SSH_HOST }}
+        run: |
+          if [ "$REF_NAME" = "main" ]; then
+            HOST_VAL="$PROD_HOST"
+          else
+            HOST_VAL="$STG_HOST"
+          fi
+          echo "Host string length is: ${#HOST_VAL}"
+          if [ "${#HOST_VAL}" -eq 0 ]; then
+            echo "ERROR: Host is empty!"
+            exit 1
+          fi
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
+        with:
+          host: ${{ github.ref_name == 'main' && secrets.PROD_SSH_HOST || secrets.STAGING_SSH_HOST }}
+          username: ${{ github.ref_name == 'main' && secrets.PROD_SSH_USER || secrets.STAGING_SSH_USER }}
+          key: ${{ github.ref_name == 'main' && secrets.PROD_SSH_KEY || secrets.STAGING_SSH_KEY }}
+          fingerprint: ${{ github.ref_name == 'main' && secrets.PROD_SSH_FINGERPRINT || secrets.STAGING_SSH_FINGERPRINT }}
+          envs: PROJECT_PATH,ENV_SUFFIX,REPO_OWNER,BRANCH_NAME,RELEASE_COMMIT,QUASAR_IMAGE_TAG,QUASAR_APP_IMAGE,QUASAR_NEST_IMAGE,QUASAR_MIGRATE_IMAGE,GHCR_PAT,ACTOR
+          script: |
+            cd "$PROJECT_PATH" || exit 1
+            if [ -n "$(git status --porcelain)" ]; then
+              echo "ERROR: Uncommitted changes found on the server. Deployment aborted to prevent overwriting manual hotfixes."
+              exit 1
+            fi
+            PREVIOUS_DEPLOY_SHA=$(git rev-parse HEAD 2>/dev/null || true)
+            export PREVIOUS_DEPLOY_SHA
+            git fetch --no-tags origin "$BRANCH_NAME"
+            git checkout --detach "$RELEASE_COMMIT"
+            test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT" || {
+              echo "ERROR: Checked out commit does not match the image SHA."
+              exit 1
+            }
+            bash "$PROJECT_PATH/scripts/deploy.sh"
+        env:
+          PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
+          ENV_SUFFIX: ${{ github.ref_name == 'main' && 'prod' || 'stg' }}
+          REPO_OWNER: ${{ steps.repo.outputs.owner }}
+          BRANCH_NAME: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          QUASAR_IMAGE_TAG: ${{ github.sha }}
+          QUASAR_APP_IMAGE: ${{ needs.release-security.outputs.app_image }}
+          QUASAR_NEST_IMAGE: ${{ needs.release-security.outputs.nest_image }}
+          QUASAR_MIGRATE_IMAGE: ${{ needs.release-security.outputs.migrate_image }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          ACTOR: ${{ github.actor }}
+
+      - name: Send Deploy Status Notification
+        if: always()
+        uses: ./.github/actions/notify-deploy
+        with:
+          status: ${{ job.status }}
+          ref-name: ${{ github.ref_name }}
+          commit-sha: ${{ github.sha }}
+          repo-name: ${{ github.repository }}
+          actor-name: ${{ github.actor }}
+          discord-webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          telegram-token: ${{ secrets.TELEGRAM_TOKEN }}
+          telegram-to: ${{ secrets.TELEGRAM_TO }}

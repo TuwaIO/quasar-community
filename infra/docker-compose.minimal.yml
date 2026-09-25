@@ -1,0 +1,643 @@
+# =============================================================================
+# Quasar — minimal single-node profile
+# =============================================================================
+# STANDALONE compose file. Use it ALONE, from the repository root:
+#
+#   docker compose --env-file .env -f infra/docker-compose.minimal.yml up -d
+#
+# Do NOT layer it on docker-compose.yml (-f docker-compose.yml -f
+# docker-compose.minimal.yml). docker-compose.yml hard-requires five HA/backup
+# variables through the ${VAR:?message} syntax — REPMGR_PASSWORD, S3_ENDPOINT,
+# S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY and WALG_LIBSODIUM_KEY. Compose
+# interpolates those while loading the base file, before any overlay is merged,
+# so an overlay cannot relax them: the command would demand a real S3/R2 bucket
+# and a WAL-G encryption key before starting anything. A self-contained file is
+# what makes a credential-free local start possible.
+#
+# Topology, compared to docker-compose.yml (production):
+#
+#   Postgres   vanilla postgres:16-alpine, one node, no repmgr, no WAL-G
+#              (production: quasar/postgresql-repmgr:16, primary + standby)
+#   Redis      one standalone redis-api, one redis-ui
+#              (production: 6-node API cluster + 2-node UI replica set)
+#   Pooling    none, the app talks to Postgres directly
+#              (production: PgBouncer in transaction mode)
+#   Ingress    direct 127.0.0.1 port mapping
+#              (production: Traefik + Cloudflare Tunnel)
+#   Backups    none
+#
+# Because the Postgres image itself differs, moving minimal -> production is a
+# data migration (pg_dump/pg_restore), not a compose-file swap. The procedure
+# is written out in docs/QUICKSTART_LOCAL.md.
+#
+# Profiles:
+#   (default)        postgres, redis-api, redis-ui, app, engine, worker
+#   utility          migrate — schema migrations and the seed runner
+#   observability    Prometheus, Grafana, Loki, Promtail, exporters
+# =============================================================================
+
+name: quasar-minimal
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Data layer
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine@sha256:3c5c8892d184f738f4fe282d14ddaa613a38f00f4189d2d94725ebe6f2909ddb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-quasar}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD must be set in .env}
+      POSTGRES_DB: ${PG_DB:-quasar}
+      # Keeps initdb deterministic across host locales.
+      POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'
+    ports:
+      # Host access for psql/pgAdmin/the native `pnpm dev` workflow.
+      - '127.0.0.1:${PG_HOST_PORT:-5432}:5432'
+      - '127.0.0.1:6432:5432'
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${PG_USER:-quasar} -d ${PG_DB:-quasar}']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    logging: *default-logging
+
+  redis-api:
+    image: redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+    restart: unless-stopped
+    # Standalone: no --cluster-enabled. The engine picks its client
+    # implementation from REDIS_API_MODE, and only the literal value "cluster"
+    # selects the cluster client (apps/server/src/redis/redis.module.ts).
+    command: redis-server /usr/local/etc/redis/redis.conf --requirepass ${REDIS_API_PASSWORD:?REDIS_API_PASSWORD must be set in .env}
+    volumes:
+      - redis_api_data:/data
+      - ./config/redis/redis-api.conf:/usr/local/etc/redis/redis.conf:ro
+    environment:
+      REDISCLI_AUTH: ${REDIS_API_PASSWORD}
+    ports:
+      - '127.0.0.1:${REDIS_API_HOST_PORT:-6379}:6379'
+      - '127.0.0.1:6371:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+    logging: *default-logging
+
+  redis-ui:
+    image: redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf --requirepass ${REDIS_UI_PASSWORD:?REDIS_UI_PASSWORD must be set in .env}
+    volumes:
+      - redis_ui_data:/data
+      - ./config/redis/redis-ui.conf:/usr/local/etc/redis/redis.conf:ro
+    environment:
+      REDISCLI_AUTH: ${REDIS_UI_PASSWORD}
+    ports:
+      - '127.0.0.1:${REDIS_UI_HOST_PORT:-6380}:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.3'
+          memory: 512M
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # Application layer
+  #
+  # The connection variables below are set under `environment:` on purpose:
+  # compose gives `environment:` precedence over `env_file:`, so the in-cluster
+  # hostnames win even when .env holds host-side URLs (127.0.0.1:6432 and so
+  # on) for the native `pnpm dev` workflow. One .env therefore serves both.
+  # ---------------------------------------------------------------------------
+  quasar-app:
+    build:
+      context: ..
+      dockerfile: infra/dockerfiles/Dockerfile.app
+      args:
+        NEXT_PUBLIC_SERVER_URL: ${NEXT_PUBLIC_SERVER_URL:-http://localhost:3000}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+        NEXT_PUBLIC_ENGINE_URL: ${NEXT_PUBLIC_ENGINE_URL:-http://localhost:3001}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+        SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN:-}
+        SENTRY_ORG: ${SENTRY_ORG:-}
+        SENTRY_PROJECT_DASHBOARD: ${SENTRY_PROJECT_DASHBOARD:-}
+        SENTRY_RELEASE: ${SENTRY_RELEASE:-latest}
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: '3000'
+      DATABASE_URL: postgresql://${PG_USER:-quasar}:${PG_PASSWORD}@postgres:5432/${PG_DB:-quasar}
+      DATABASE_URL_READ: postgresql://${PG_USER:-quasar}:${PG_PASSWORD}@postgres:5432/${PG_DB:-quasar}
+      REDIS_API_URL: redis://:${REDIS_API_PASSWORD}@redis-api:6379
+      REDIS_API_MODE: single
+      REDIS_UI_URL: redis://:${REDIS_UI_PASSWORD}@redis-ui:6379
+      REDIS_UI_MODE: single
+      INTERNAL_ENGINE_URL: http://quasar-nest-api:3001
+    ports:
+      - '127.0.0.1:${APP_HOST_PORT:-3000}:3000'
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/apps/dashboard/.next/cache
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-api:
+        condition: service_healthy
+      redis-ui:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '-sf', 'http://127.0.0.1:3000/api/health/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    logging: *default-logging
+
+  quasar-nest-api:
+    build:
+      context: ..
+      dockerfile: infra/dockerfiles/Dockerfile.nest
+      args:
+        SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN:-}
+        SENTRY_ORG: ${SENTRY_ORG:-}
+        SENTRY_PROJECT_ENGINE: ${SENTRY_PROJECT_ENGINE:-}
+        SENTRY_RELEASE: ${SENTRY_RELEASE:-latest}
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      NODE_ENV: production
+      PORT: '3001'
+      DATABASE_URL: postgresql://${PG_USER:-quasar}:${PG_PASSWORD}@postgres:5432/${PG_DB:-quasar}
+      DATABASE_URL_READ: postgresql://${PG_USER:-quasar}:${PG_PASSWORD}@postgres:5432/${PG_DB:-quasar}
+      REDIS_API_URL: redis://:${REDIS_API_PASSWORD}@redis-api:6379
+      REDIS_API_MODE: single
+      ENABLE_WORKERS: 'false'
+    ports:
+      - '127.0.0.1:${ENGINE_HOST_PORT:-3001}:3001'
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://127.0.0.1:3001/v1/engine/monitoring/health']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    logging: *default-logging
+
+  quasar-worker:
+    build:
+      context: ..
+      dockerfile: infra/dockerfiles/Dockerfile.nest
+      args:
+        SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN:-}
+        SENTRY_ORG: ${SENTRY_ORG:-}
+        SENTRY_PROJECT_ENGINE: ${SENTRY_PROJECT_ENGINE:-}
+        SENTRY_RELEASE: ${SENTRY_RELEASE:-latest}
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      NODE_ENV: production
+      PORT: '3001'
+      DATABASE_URL: postgresql://${PG_USER:-quasar}:${PG_PASSWORD}@postgres:5432/${PG_DB:-quasar}
+      DATABASE_URL_READ: postgresql://${PG_USER:-quasar}:${PG_PASSWORD}@postgres:5432/${PG_DB:-quasar}
+      REDIS_API_URL: redis://:${REDIS_API_PASSWORD}@redis-api:6379
+      REDIS_API_MODE: single
+      ENABLE_WORKERS: 'true'
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://127.0.0.1:3001/v1/engine/monitoring/health']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # Utility (profile: utility) — one-shot, never runs as part of `up`
+  #
+  #   docker compose ... run --rm migrate
+  #   docker compose ... run --rm migrate pnpm --filter @tuwaio/quasar seed
+  #
+  # Same container serves migrations and the seed runner, mirroring how
+  # scripts/deploy.sh drives production.
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: ..
+      dockerfile: infra/dockerfiles/Dockerfile.app
+      target: builder
+      args:
+        NEXT_PUBLIC_SERVER_URL: ${NEXT_PUBLIC_SERVER_URL:-http://localhost:3000}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+        NEXT_PUBLIC_ENGINE_URL: ${NEXT_PUBLIC_ENGINE_URL:-http://localhost:3001}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+        SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN:-}
+        SENTRY_ORG: ${SENTRY_ORG:-}
+        SENTRY_PROJECT_DASHBOARD: ${SENTRY_PROJECT_DASHBOARD:-}
+        SENTRY_RELEASE: ${SENTRY_RELEASE:-latest}
+    profiles:
+      - utility
+    command: pnpm --filter @tuwaio/quasar payload migrate
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql://${PG_USER:-quasar}:${PG_PASSWORD}@postgres:5432/${PG_DB:-quasar}
+      DATABASE_URL_READ: postgresql://${PG_USER:-quasar}:${PG_PASSWORD}@postgres:5432/${PG_DB:-quasar}
+      REDIS_API_URL: redis://:${REDIS_API_PASSWORD}@redis-api:6379
+      REDIS_API_MODE: single
+      REDIS_UI_URL: redis://:${REDIS_UI_PASSWORD}@redis-ui:6379
+      REDIS_UI_MODE: single
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - quasar_net
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # Observability (profile: observability)
+  #
+  #   docker compose ... --profile observability up -d
+  #
+  # Alertmanager and Blackbox are deliberately absent: the first needs a
+  # Discord/Telegram channel to be useful at all, the second probes public
+  # FQDNs. Both belong to the production profile. Grafana still starts without
+  # any alert channel configured — it simply skips alerting provisioning.
+  # ---------------------------------------------------------------------------
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.2@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476
+    profiles:
+      - observability
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1
+      - NETWORKS=1
+      - SERVICES=1
+      - SWARM=0
+      - TASKS=0
+      - VOLUMES=0
+      - INFO=1
+      - VERSION=1
+      - POST=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - quasar_net
+    logging: *default-logging
+
+  prometheus:
+    image: prom/prometheus:v3.11.3@sha256:e4254400b85610324913f0dc4acf92603d9984e7519414c5a12811aa6146acc3
+    profiles:
+      - observability
+    restart: unless-stopped
+    user: 'nobody'
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--storage.tsdb.retention.size=5GB'
+    volumes:
+      - ./config/prometheus/prometheus.minimal.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - '127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090'
+    depends_on:
+      - docker-proxy
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:11.6.0@sha256:62d2b9d20a19714ebfe48d1bb405086081bc602aa053e28cf6d73c7537640dfb
+    profiles:
+      - observability
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_PATHS_PROVISIONING: /tmp/grafana-provisioning
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning-templates:ro
+    ports:
+      - '127.0.0.1:${GRAFANA_HOST_PORT:-3002}:3000'
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        mkdir -p /tmp/grafana-provisioning/dashboards /tmp/grafana-provisioning/datasources /tmp/grafana-provisioning/alerting
+        # Only the provider file is rendered here. The dashboard JSON is read
+        # in place from the read-only mount - see the path in dashboards.yml.
+        cp /etc/grafana/provisioning-templates/dashboards/dashboards.yml /tmp/grafana-provisioning/dashboards/
+        cp -r /etc/grafana/provisioning-templates/datasources/. /tmp/grafana-provisioning/datasources/
+
+        # Grafana does not fail on a provider path that holds no dashboards:
+        # it logs "Cannot read directory" every 30s and serves an empty list.
+        # That is how every dashboard went missing unnoticed once, so a wrong
+        # or empty path stops the container here instead.
+        DASHBOARDS_DIR=$$(sed -n 's/^ *path: *//p' /tmp/grafana-provisioning/dashboards/dashboards.yml)
+        if ! ls "$$DASHBOARDS_DIR"/*.json >/dev/null 2>&1; then
+          echo "[Grafana] ERROR: dashboards.yml points at '$$DASHBOARDS_DIR', which holds no *.json dashboards." >&2
+          exit 1
+        fi
+
+        RECEIVERS=""
+        if [ -n "$$DISCORD_WEBHOOK_URL" ]; then
+          RECEIVERS="$$RECEIVERS$$(printf '\n      - uid: notify-discord\n        type: discord\n        settings:\n          url: "%s"' "$$DISCORD_WEBHOOK_URL")"
+        fi
+        if [ -n "$$TELEGRAM_BOT_TOKEN" ] && [ -n "$$TELEGRAM_CHAT_ID" ]; then
+          RECEIVERS="$$RECEIVERS$$(printf '\n      - uid: notify-telegram\n        type: telegram\n        settings:\n          bottoken: "%s"\n          chatid: "%s"' "$$TELEGRAM_BOT_TOKEN" "$$TELEGRAM_CHAT_ID")"
+        fi
+
+        # Grafana is a dashboards tool first: a missing alert channel degrades
+        # alerting instead of blocking startup. The loud "you forgot to
+        # configure ops alerting" signal is the alertmanager service, which
+        # does refuse to start without a channel - it has no other purpose.
+        if [ -n "$$RECEIVERS" ]; then
+          cp /etc/grafana/provisioning-templates/alerting/policies.yml /tmp/grafana-provisioning/alerting/policies.yml
+          {
+            echo "apiVersion: 1"
+            echo ""
+            echo "contactPoints:"
+            echo "  - orgId: 1"
+            echo "    name: Notify"
+            echo "    receivers:"
+            printf '%s\n' "$$RECEIVERS"
+          } > /tmp/grafana-provisioning/alerting/contact-points.yml
+        else
+          echo "[Grafana] WARNING: no DISCORD_WEBHOOK_URL / TELEGRAM_BOT_TOKEN set - dashboards will work, alert notifications are disabled." >&2
+        fi
+
+        exec /run.sh
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    logging: *default-logging
+
+  loki:
+    image: grafana/loki:3.6.11@sha256:44148ad243c07957113baea950ee5ba9b0c8eff8d7e38ff3cc1c0af705790945
+    profiles:
+      - observability
+    restart: unless-stopped
+    user: '10001'
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./config/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    logging: *default-logging
+
+  promtail:
+    image: grafana/promtail:3.6.11@sha256:a761cb834cfaeee29745440d4884d6748f0a08d8f68928db1d707018c1dcfbe9
+    profiles:
+      - observability
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./config/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - promtail_data:/data
+    depends_on:
+      - loki
+      - docker-proxy
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 256M
+    logging: *default-logging
+
+  node-exporter:
+    image: prom/node-exporter:v1.11.1@sha256:e9cff4fc67b1818f8c97adb115b9f12c9a54b533de86765d4a0effc01b357205
+    profiles:
+      - observability
+    restart: unless-stopped
+    command:
+      - '--path.rootfs=/host'
+      # Most VMs and every Docker Desktop VM expose no power supply class;
+      # without this the collector logs an error on every scrape.
+      - '--no-collector.powersupplyclass'
+    pid: host
+    volumes:
+      # Deliberately no `rslave`. The propagation flag requires the source to
+      # already be a shared or slave mount, which the root filesystem is not
+      # inside the Docker Desktop VM — so on macOS and Windows the whole
+      # `observability` profile died on this one line with
+      # "path / is mounted on / but it is not a shared or slave mount",
+      # taking Grafana, Prometheus and Loki down with it.
+      #
+      # What rslave buys on Linux is visibility of filesystems mounted *after*
+      # the container starts. For a single-node stack that is a rounding error,
+      # and infra/docker-compose.yml has always mounted this without the flag.
+      - /:/host:ro
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+    logging: *default-logging
+
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.57.0@sha256:e75bdb03b74b0b6995f208f166fead2e6e555dde73e44200113bb26f41b1981d
+    profiles:
+      - observability
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.3'
+          memory: 256M
+    logging: *default-logging
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.19.1@sha256:e96064f876226d94bb6ce48a4c4b3dd76edba91168ec1ab024e5c4b959310b0f
+    profiles:
+      - observability
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: postgresql://${PG_USER:-quasar}:${PG_PASSWORD}@postgres:5432/${PG_DB:-quasar}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+    logging: *default-logging
+
+  redis-exporter-api:
+    image: oliver006/redis_exporter:v1.83.0@sha256:e8c209894d4c0cc55b1259ddd47e0b769ad1ff864b356736ee885462a3b0e48c
+    profiles:
+      - observability
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis-api:6379
+      REDIS_PASSWORD: ${REDIS_API_PASSWORD}
+    depends_on:
+      redis-api:
+        condition: service_healthy
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+    logging: *default-logging
+
+  redis-exporter-ui:
+    image: oliver006/redis_exporter:v1.83.0@sha256:e8c209894d4c0cc55b1259ddd47e0b769ad1ff864b356736ee885462a3b0e48c
+    profiles:
+      - observability
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis-ui:6379
+      REDIS_PASSWORD: ${REDIS_UI_PASSWORD}
+    depends_on:
+      redis-ui:
+        condition: service_healthy
+    networks:
+      - quasar_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+    logging: *default-logging
+
+networks:
+  quasar_net:
+    driver: bridge
+
+volumes:
+  pg_data:
+  redis_api_data:
+  redis_ui_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  promtail_data:

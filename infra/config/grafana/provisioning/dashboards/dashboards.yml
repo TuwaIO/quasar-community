@@ -1,0 +1,24 @@
+apiVersion: 1
+
+providers:
+  - name: default
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      # Read in place from the read-only mount of this directory, not from the
+      # rendered GF_PATHS_PROVISIONING tree: the Grafana entrypoint in
+      # docker-compose.yml and docker-compose.minimal.yml copies only this
+      # provider file there. Reading the mount means an edited dashboard is
+      # picked up within updateIntervalSeconds, with no container restart —
+      # deploy.sh does not recreate Grafana when only a JSON file changes.
+      #
+      # This used to say /etc/grafana/provisioning/dashboards/json, which
+      # stopped existing when provisioning moved to a rendered /tmp tree. Grafana
+      # does not fail on a missing path, it logs "Cannot read directory" and
+      # serves an empty list, so the entrypoint now refuses to start instead.
+      path: /etc/grafana/provisioning-templates/dashboards/json
+      foldersFromFilesStructure: false

@@ -1,0 +1,140 @@
+# This file is used to override the default docker-compose.yml ONLY for the production environment
+# Run: docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.prod.yml up -d
+
+services:
+  # WAL-G physical base backups run every 6 hours in production. Continuous WAL
+  # archiving streams in real-time independently from this interval; pg-backup remains daily.
+  wal-g-backup:
+    environment:
+      WALG_BACKUP_INTERVAL_SECONDS: '21600'
+
+  traefik:
+    ports:
+      - '127.0.0.1:80:80'
+      - '127.0.0.1:443:443'
+    environment:
+      - DOCKER_API_VERSION=1.44
+    command:
+      - '--api.dashboard=true'
+      - '--providers.docker=true'
+      - '--providers.docker.exposedbydefault=false'
+      - '--providers.docker.network=public_net'
+      - '--entrypoints.web.address=:80'
+      - '--entrypoints.websecure.address=:443'
+      - '--log.level=INFO'
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=public_net'
+      # Global CORS Middleware
+      - 'traefik.http.middlewares.cors-gate.headers.accessControlAllowMethods=GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS'
+      - 'traefik.http.middlewares.cors-gate.headers.accessControlAllowHeaders=Content-Type,Accept,Authorization,x-api-key,x-tuwa-public-key,x-tuwa-secret-key,x-internal-secret,x-tuwa-quota-weight,x-tuwa-remaining,x-tuwa-metadata'
+      - 'traefik.http.middlewares.cors-gate.headers.accessControlAllowOriginList=*'
+      - 'traefik.http.middlewares.cors-gate.headers.accessControlMaxAge=100'
+      - 'traefik.http.middlewares.cors-gate.headers.addVaryHeader=true'
+      # Dashboard Router
+      - 'traefik.http.routers.dashboard.rule=Host(`traefik.${DOMAIN}`)'
+      - 'traefik.http.routers.dashboard.entrypoints=web'
+      - 'traefik.http.routers.dashboard.service=api@internal'
+      - 'traefik.http.routers.dashboard.middlewares=basic-auth'
+      # Rate Limit Middleware (100 req/s per IP)
+      - 'traefik.http.middlewares.rate-limit.ratelimit.average=100'
+      - 'traefik.http.middlewares.rate-limit.ratelimit.burst=50'
+
+  postgresql-primary:
+    ports:
+      - '127.0.0.1:5432:5432'
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+    cpus: 2.0
+    mem_limit: 2048m
+
+  pgadmin:
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=public_net'
+      - 'traefik.http.services.pgadmin.loadbalancer.server.port=80'
+      - 'traefik.http.routers.pgadmin.rule=Host(`pgadmin.${DOMAIN}`)'
+      - 'traefik.http.routers.pgadmin.entrypoints=web'
+      - 'traefik.http.routers.pgadmin.middlewares=basic-auth'
+
+  redisinsight:
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=public_net'
+      - 'traefik.http.services.redisinsight.loadbalancer.server.port=5540'
+      - 'traefik.http.routers.redisinsight.rule=Host(`redis.${DOMAIN}`)'
+      - 'traefik.http.routers.redisinsight.entrypoints=web'
+      - 'traefik.http.routers.redisinsight.middlewares=basic-auth'
+
+  quasar-app:
+    build: !reset null
+    image: ${QUASAR_APP_IMAGE:?QUASAR_APP_IMAGE must be a signed ghcr.io image@sha256 reference}
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=public_net'
+      - 'traefik.http.services.quasar-app.loadbalancer.server.port=3000'
+      - 'traefik.http.routers.quasar-app.rule=Host(`quasar.${DOMAIN}`)'
+      - 'traefik.http.routers.quasar-app.entrypoints=web,websecure'
+      - 'traefik.http.routers.quasar-app.service=quasar-app'
+      - 'traefik.http.routers.quasar-app.priority=100'
+      - 'traefik.http.routers.quasar-app.middlewares=rate-limit'
+    deploy:
+      mode: replicated
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    cpus: 1.0
+    mem_limit: 1024m
+
+  quasar-nest-api:
+    build: !reset null
+    image: ${QUASAR_NEST_IMAGE:?QUASAR_NEST_IMAGE must be a signed ghcr.io image@sha256 reference}
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=public_net'
+      - 'traefik.http.services.quasar-nest.loadbalancer.server.port=3001'
+      - 'traefik.http.routers.quasar-nest.rule=Host(`api.${DOMAIN}`)'
+      - 'traefik.http.routers.quasar-nest.entrypoints=web,websecure'
+      - 'traefik.http.routers.quasar-nest.service=quasar-nest'
+      - 'traefik.http.routers.quasar-nest.priority=1000'
+      - 'traefik.http.routers.quasar-nest.middlewares=cors-gate,rate-limit'
+    deploy:
+      mode: replicated
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    cpus: 1.0
+    mem_limit: 1024m
+
+  quasar-worker:
+    build: !reset null
+    image: ${QUASAR_NEST_IMAGE:?QUASAR_NEST_IMAGE must be a signed ghcr.io image@sha256 reference}
+    deploy:
+      mode: replicated
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    cpus: 1.0
+    mem_limit: 1024m
+
+  grafana:
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=public_net'
+      - 'traefik.http.services.grafana.loadbalancer.server.port=3000'
+      - 'traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)'
+      - 'traefik.http.routers.grafana.entrypoints=web'
+      - 'traefik.http.routers.grafana.middlewares=basic-auth'
+
+  migrate:
+    build: !reset null
+    image: ${QUASAR_MIGRATE_IMAGE:?QUASAR_MIGRATE_IMAGE must be a signed ghcr.io image@sha256 reference}

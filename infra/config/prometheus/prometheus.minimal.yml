@@ -1,0 +1,75 @@
+# Prometheus config for the minimal single-node profile
+# (infra/docker-compose.minimal.yml, profile: observability).
+#
+# Differs from prometheus.yml (production) because the minimal topology has
+# different service names and fewer of them:
+#   - one `postgres` instead of postgres-exporter-{primary,standby}
+#   - one `redis-api` / `redis-ui` instead of a 6-node cluster + 2-node pair
+#   - no PgBouncer, no Traefik, no Cloudflare Tunnel, no Blackbox probes
+#
+# There is no `alerting:` block and no rule_files: Alertmanager is not part of
+# the minimal profile (it needs a Discord/Telegram channel to do anything).
+# Grafana's own alerting still works against these datasources.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['prometheus:9090']
+
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+  - job_name: 'redis-api'
+    static_configs:
+      - targets: ['redis-exporter-api:9121']
+
+  - job_name: 'redis-ui'
+    static_configs:
+      - targets: ['redis-exporter-ui:9121']
+
+  # The app and engine are discovered through the Docker socket proxy, so the
+  # job keeps working if containers are replaced or scaled.
+  - job_name: 'quasar-nest'
+    metrics_path: '/metrics'
+    docker_sd_configs:
+      - host: http://docker-proxy:2375
+    relabel_configs:
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        regex: 'quasar-nest-api|quasar-worker'
+        action: keep
+      - source_labels: [__meta_docker_container_name]
+        regex: '/(.*)'
+        target_label: instance
+      - source_labels: [__meta_docker_network_ip]
+        regex: '(.+)'
+        replacement: '$1:3001'
+        target_label: __address__
+
+  - job_name: 'quasar-app'
+    metrics_path: '/api/metrics'
+    docker_sd_configs:
+      - host: http://docker-proxy:2375
+    relabel_configs:
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        regex: 'quasar-app'
+        action: keep
+      - source_labels: [__meta_docker_container_name]
+        regex: '/(.*)'
+        target_label: instance
+      - source_labels: [__meta_docker_network_ip]
+        regex: '(.+)'
+        replacement: '$1:3000'
+        target_label: __address__

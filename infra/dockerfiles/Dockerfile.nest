@@ -1,0 +1,123 @@
+# syntax=docker/dockerfile:1
+# ── Stage: Base ──────────────────────────────────────────────────────────────
+# Using Debian Bookworm Slim for consistency and compatibility.
+FROM node:24-bookworm-slim AS base
+
+# Lets GHCR associate the published image with the repository so repository-
+# based package permissions can be applied.
+LABEL org.opencontainers.image.source="https://github.com/TuwaIO/quasar-community"
+
+# Run full system upgrade to patch vulnerabilities (e.g. libgnutls30),
+# then install specific required packages.
+# Cache bust: 2026-08-03
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+    libc6 \
+    openssl \
+    curl \
+    ca-certificates \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable && corepack prepare pnpm@11.21.0 --activate && npm install -g npm@latest
+
+# ── Stage: Dependencies ──────────────────────────────────────────────────────
+FROM base AS deps
+WORKDIR /app
+
+# Copy workspace meta
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc ./
+COPY packages/shared/package.json ./packages/shared/package.json
+COPY apps/server/package.json ./apps/server/package.json
+
+# Prefetch dependencies using BuildKit cache mount
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+
+# ── Stage: Builder ───────────────────────────────────────────────────────────
+FROM base AS builder
+WORKDIR /app
+
+# Copy full source code
+COPY . .
+
+# Ensure devDependencies are installed for the build phase
+ENV NODE_ENV=development
+
+# IMPORTANT: Run pnpm install with the full source present.
+# The cache mount ensures this is fast, while having all package.json files
+# present ensures correct workspace symlinking.
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+
+# Ensure production environment for the build phase
+ENV NODE_ENV=production
+
+# Build local shared packages
+RUN pnpm --filter @tuwaio/shared build
+
+# Build NestJS server
+WORKDIR /app/apps/server
+RUN pnpm build
+
+# Sentry source map upload for NestJS
+ARG SENTRY_AUTH_TOKEN
+ARG SENTRY_ORG
+ARG SENTRY_PROJECT_ENGINE
+ARG SENTRY_RELEASE
+
+# No org/project defaults. They used to fall back to TUWA's own Sentry
+# organization, so a build that supplied only SENTRY_AUTH_TOKEN uploaded — or
+# rather, tried to upload — into an org it had no access to, and the failure
+# surfaced as an auth error that reads like a bad token. Both are now required
+# alongside the token, and the step is skipped when any of the three is absent.
+RUN if [ -n "$SENTRY_AUTH_TOKEN" ] && [ -n "$SENTRY_ORG" ] && [ -n "$SENTRY_PROJECT_ENGINE" ]; then \
+      npx -y @sentry/cli sourcemaps upload \
+        --auth-token "$SENTRY_AUTH_TOKEN" \
+        --org "$SENTRY_ORG" \
+        --project "$SENTRY_PROJECT_ENGINE" \
+        --release "${SENTRY_RELEASE:-unknown}" \
+        ./dist \
+      || echo "[WARN] Sentry source map upload failed, continuing build..."; \
+    elif [ -n "$SENTRY_AUTH_TOKEN" ]; then \
+      echo "[WARN] SENTRY_AUTH_TOKEN is set but SENTRY_ORG/SENTRY_PROJECT_ENGINE are not; skipping source map upload."; \
+    fi
+
+# Extract production bundle using pnpm deploy
+# This isolates @tuwaio/quasar-nest and its prod dependencies.
+WORKDIR /app
+RUN NODE_OPTIONS="--max-old-space-size=4096" pnpm deploy --config.inject-workspace-packages=true --filter @tuwaio/quasar-nest --prod /prod/nest
+
+# ── Stage: Runner ────────────────────────────────────────────────────────────
+FROM base AS runner
+WORKDIR /app
+
+# Production environment
+ENV NODE_ENV=production
+ENV PORT=3001
+
+# Remove global package manager from runtime image to eliminate attack surface & bundled CVEs
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /root/.npm
+
+# Sentry release identifier (runtime)
+ARG SENTRY_RELEASE
+ENV SENTRY_RELEASE=${SENTRY_RELEASE}
+
+# Create a system user
+RUN groupadd --system --gid 1001 nestjs && \
+    useradd --system --uid 1001 --gid 1001 nestjs
+
+# Copy the isolated production bundle from pnpm deploy
+COPY --from=builder --chown=nestjs:nestjs /prod/nest ./
+
+USER nestjs
+
+EXPOSE 3001
+
+# Metadata
+LABEL maintainer="Oleksandr Tkach"
+LABEL project="Quasar Engine (NestJS)"
+
+# Entrypoint
+CMD ["node", "dist/main.js"]

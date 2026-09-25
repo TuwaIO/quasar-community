@@ -1,0 +1,104 @@
+name: CI Quality Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+      - staging
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+
+permissions:
+  contents: read
+  pull-requests: read
+  security-events: write
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint, Typecheck, Test & Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Shared Packages
+        run: pnpm --filter @tuwaio/shared build
+
+      - name: Run Linter
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Run Tests
+        run: pnpm test
+
+      # gitleaks-action refuses to run on an organization-owned repository
+      # without GITLEAKS_LICENSE; the gitleaks binary itself is MIT and needs no
+      # key. Without the license (the public Community Edition, a fork owned by
+      # an organization) the same scanner runs through the CLI with the same
+      # .gitleaks.toml. Both paths fail the job on a finding.
+      - name: Detect Gitleaks license
+        id: gitleaks
+        env:
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        run: echo "licensed=$([ -n "$GITLEAKS_LICENSE" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Run Gitleaks Secret Scanner
+        if: steps.gitleaks.outputs.licensed == 'true'
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+      - name: Run Gitleaks Secret Scanner (CLI, no license)
+        if: steps.gitleaks.outputs.licensed != 'true'
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/repo" \
+            zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git /repo --redact --no-banner --exit-code 1
+
+  semgrep-security-scan:
+    name: Semgrep Security Scan
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep:1.157.0
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # `semgrep ci` reads its policy from Semgrep Cloud Platform and cannot run
+      # without SEMGREP_APP_TOKEN. Without the token the public p/default
+      # registry ruleset runs instead, and a finding still fails the job.
+      - name: Run Semgrep CI
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        run: |
+          if [ -n "$SEMGREP_APP_TOKEN" ]; then
+            semgrep ci
+          else
+            echo "::notice::SEMGREP_APP_TOKEN is not set; scanning with the public p/default ruleset."
+            semgrep scan --config p/default --error --metrics=off
+          fi
