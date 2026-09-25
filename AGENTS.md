@@ -271,7 +271,7 @@ This project is 100% self-hosted on bare metal/VPS via Docker. Any suggestion to
 ### Secret and SAST Scanning
 
 - **`.gitleaks.toml` MUST start with `[extend] useDefault = true`.** A gitleaks config that contains only an `[allowlist]` replaces the built-in ruleset instead of extending it, and then every scan passes. Add false positives to the allowlist; never remove the `[extend]` block to silence them.
-- **The scanners need no secrets and are never skipped.** Without `GITLEAKS_LICENSE`, `ci.yml` and `deploy.yml` run the pinned gitleaks CLI image instead of `gitleaks-action`. Without `SEMGREP_APP_TOKEN`, they run `semgrep scan --config p/default --error` instead of `semgrep ci`. A finding fails the job in both modes. See `docs/CICD_SETUP.md`, §3.
+- **The scanners need no secrets and are never skipped.** Without `GITLEAKS_LICENSE`, `ci.yml` and `deploy.yml` run the pinned gitleaks CLI image instead of `gitleaks-action`, scanning only the PR (`base..head`) or push (`before..sha`) range like the action does. Without `SEMGREP_APP_TOKEN`, they run `semgrep scan --config p/default --error` instead of `semgrep ci`. A finding fails the job in both modes. Pin a reviewed gitleaks false positive by fingerprint in `.gitleaksignore`. Mark a reviewed Semgrep one with `// nosemgrep: <rule-id>` on the line before, and pass `${{ inputs.* }}` into workflow `run:` blocks through `env:`. See `docs/CICD_SETUP.md`, §3.
 
 ---
 

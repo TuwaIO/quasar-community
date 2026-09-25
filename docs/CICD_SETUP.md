@@ -110,11 +110,15 @@ either mode. Neither is ever skipped.
 
 **Gitleaks.** `gitleaks-action` requires `GITLEAKS_LICENSE` on
 organization-owned repositories. The gitleaks binary itself needs no key, so
-without the license the workflow runs the pinned `zricethezav/gitleaks` image
-over the full checked-out history. Both paths read `.gitleaks.toml`. That file
-must keep its `[extend] useDefault = true` block: a gitleaks config that
-contains only an `[allowlist]` replaces the built-in ruleset instead of
-extending it, and then every scan passes.
+without the license the workflow runs the pinned `zricethezav/gitleaks` image.
+Like the action, it scans only the commits under review: the PR's
+`base..head` in `ci.yml` and the pushed `before..sha` in `deploy.yml`. When a
+push has no usable `before`, such as a branch's first push, it scans the whole
+history instead. Findings are printed redacted. Both paths read
+`.gitleaks.toml` and `.gitleaksignore`. `.gitleaks.toml` must keep its
+`[extend] useDefault = true` block: a gitleaks config that contains only an
+`[allowlist]` replaces the built-in ruleset instead of extending it, and then
+every scan passes.
 
 **Semgrep.** With `SEMGREP_APP_TOKEN`, `semgrep ci` applies the policy
 configured in Semgrep Cloud Platform. Without it, the workflow runs

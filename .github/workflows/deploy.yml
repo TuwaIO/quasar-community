@@ -117,12 +117,23 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 
+      # Scans the pushed commits (before..sha), as gitleaks-action does. With no
+      # usable `before` (a branch's first push) it scans the whole history,
+      # which is the fail-closed direction. --verbose prints each finding.
       - name: Run Gitleaks Secret Scanner (CLI, no license)
         if: steps.check-ci.outputs.skip != 'true' && steps.gitleaks.outputs.licensed != 'true'
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
         run: |
+          RANGE=()
+          if [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ] \
+            && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            RANGE=(--log-opts="${BEFORE_SHA}..${AFTER_SHA}")
+          fi
           docker run --rm -v "${{ github.workspace }}:/repo" \
             zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
-            git /repo --redact --no-banner --exit-code 1
+            git /repo "${RANGE[@]}" --redact --verbose --no-banner --exit-code 1
 
       # Cloud policy with a token, public p/default ruleset without one; a
       # finding fails the job either way. Rationale in ci.yml.

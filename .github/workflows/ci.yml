@@ -71,12 +71,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 
+      # Scans the PR's own commits (base..head), as gitleaks-action does, not
+      # the whole history. --verbose prints each (redacted) finding.
       - name: Run Gitleaks Secret Scanner (CLI, no license)
         if: steps.gitleaks.outputs.licensed != 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           docker run --rm -v "${{ github.workspace }}:/repo" \
             zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
-            git /repo --redact --no-banner --exit-code 1
+            git /repo --log-opts="${BASE_SHA}..${HEAD_SHA}" --redact --verbose --no-banner --exit-code 1
 
   semgrep-security-scan:
     name: Semgrep Security Scan
