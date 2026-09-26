@@ -10,6 +10,7 @@ import { Counter, Gauge } from 'prom-client';
 import { getAlchemyKey } from '../../constants';
 import * as schema from '../../database/schema/index';
 import { alchemyNetworkMap } from '../../lib/generated/alchemyNetworkMap';
+import { isUsableRpcUrl } from './rpc-guard';
 
 type UpdateFn = (txKey: string, data: UpdatableTransactionFields, isTerminal?: boolean) => Promise<void>;
 
@@ -42,10 +43,13 @@ export async function processSolanaTx(
     .from(schema.appsRpcConfigs)
     .where(and(eq(schema.appsRpcConfigs.parentId, appId), eq(schema.appsRpcConfigs.chainId, chainId)));
 
-  appConfigs.forEach((c) => {
-    rpcUrls.push(decrypt(c.rpcUrl));
-    sources.push('App Overwrite');
-  });
+  for (const c of appConfigs) {
+    const url = decrypt(c.rpcUrl);
+    if (await isUsableRpcUrl(url, '[SOLANA TRACKER]', 'App Overwrite')) {
+      rpcUrls.push(url);
+      sources.push('App Overwrite');
+    }
+  }
 
   // B. App-specific Alchemy
   const alchemyNetwork = alchemyNetworkMap[chainId];
@@ -61,24 +65,23 @@ export async function processSolanaTx(
     const url = decryptedQuickNodeKey.startsWith('http')
       ? decryptedQuickNodeKey
       : `https://${app.quickNodeAppName}.quiknode.pro/${decryptedQuickNodeKey}/`;
-    rpcUrls.push(url);
-    sources.push('App QuickNode');
+    if (await isUsableRpcUrl(url, '[SOLANA TRACKER]', 'App QuickNode')) {
+      rpcUrls.push(url);
+      sources.push('App QuickNode');
+    }
   }
 
-  // D. Client-side Hint (The RPC that actually produced the tx)
-  if (tx.rpcUrl) {
-    rpcUrls.push(tx.rpcUrl);
-    sources.push('Client Hint');
-  }
+  // `tx.rpcUrl` from the sync request is deliberately not used: any API key holder could point
+  // the worker at an arbitrary host with it. It stays on the transaction record as metadata.
 
-  // E. System Alchemy Fallback
+  // D. System Alchemy Fallback
   const systemAlchemyKey = getAlchemyKey();
   if (systemAlchemyKey && alchemyNetwork) {
     rpcUrls.push(`https://${alchemyNetwork}.g.alchemy.com/v2/${systemAlchemyKey}`);
     sources.push('System Alchemy');
   }
 
-  // F. Public Fallback
+  // E. Public Fallback
   if (chainId === 'solana:mainnet') {
     rpcUrls.push('https://api.mainnet-beta.solana.com');
     sources.push('Public Fallback');

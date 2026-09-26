@@ -4,18 +4,17 @@ import { ConfigService } from '@nestjs/config';
 import { createId } from '@paralleldrive/cuid2';
 import { QUOTA_DEFAULTS } from '@tuwaio/shared/constants';
 import { decrypt } from '@tuwaio/shared/encryption';
+import { isInternalHost, isPrivateOrBlockedIP } from '@tuwaio/shared/ssrf';
 import { isLocalhostUrl } from '@tuwaio/shared/utils';
 import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import { Job } from 'bullmq';
 import { createHmac } from 'crypto';
 import { lookup as callbackLookup } from 'dns';
-import { lookup, resolve4, resolve6 } from 'dns/promises';
 import { and, desc, eq } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as http from 'http';
 import * as https from 'https';
 import { Redis } from 'ioredis';
-import { isIP } from 'net';
 import { Counter, Histogram } from 'prom-client';
 import * as zlib from 'zlib';
 
@@ -38,142 +37,6 @@ export interface WebhookJobData {
   txType: string;
   appId: string;
   organizationId?: string;
-}
-
-/**
- * Normalizes an IPv4 or IPv6 address string.
- * Converts IPv4-mapped IPv6 (e.g. `::ffff:127.0.0.1` or hex `::ffff:7f00:0001`) into standard IPv4 decimal notation.
- */
-export function normalizeIP(ip: string): string {
-  let normalized = ip.trim().toLowerCase();
-
-  // Strip IPv6 scope ID (e.g. fe80::1%eth0)
-  const zoneIndex = normalized.indexOf('%');
-  if (zoneIndex !== -1) {
-    normalized = normalized.substring(0, zoneIndex);
-  }
-
-  // Handle IPv4-mapped IPv6
-  if (normalized.startsWith('::ffff:')) {
-    const rest = normalized.slice(7);
-    if (rest.includes('.')) {
-      return rest;
-    }
-    const parts = rest.split(':');
-    if (parts.length === 2) {
-      const high = parseInt(parts[0], 16);
-      const low = parseInt(parts[1], 16);
-      if (!isNaN(high) && !isNaN(low)) {
-        const b1 = (high >> 8) & 0xff;
-        const b2 = high & 0xff;
-        const b3 = (low >> 8) & 0xff;
-        const b4 = low & 0xff;
-        return `${b1}.${b2}.${b3}.${b4}`;
-      }
-    }
-  }
-
-  return normalized;
-}
-
-/**
- * Checks if an IP address (IPv4 or IPv6) belongs to private, loopback, link-local, multicast,
- * CGNAT, reserved, documentation, or unspecified ranges.
- */
-export function isPrivateOrBlockedIP(rawIp: string): boolean {
-  const ip = normalizeIP(rawIp);
-
-  // Check IPv4 format
-  const ipv4Match = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4Match) {
-    const octets = ipv4Match.slice(1, 5).map((n) => parseInt(n, 10));
-    if (octets.some((o) => o < 0 || o > 255)) return true;
-
-    const [o1, o2, o3] = octets;
-
-    // 0.0.0.0/8 (Current network / "this host")
-    if (o1 === 0) return true;
-
-    // 10.0.0.0/8 (Private-Use)
-    if (o1 === 10) return true;
-
-    // 100.64.0.0/10 (CGNAT / Shared Address Space: 100.64.0.0 - 100.127.255.255)
-    if (o1 === 100 && o2 >= 64 && o2 <= 127) return true;
-
-    // 127.0.0.0/8 (Loopback: 127.0.0.0 - 127.255.255.255)
-    if (o1 === 127) return true;
-
-    // 169.254.0.0/16 (Link-Local: 169.254.0.0 - 169.254.255.255)
-    if (o1 === 169 && o2 === 254) return true;
-
-    // 172.16.0.0/12 (Private-Use: 172.16.0.0 - 172.31.255.255)
-    if (o1 === 172 && o2 >= 16 && o2 <= 31) return true;
-
-    // 192.0.0.0/24 (IETF Protocol Assignments)
-    if (o1 === 192 && o2 === 0 && o3 === 0) return true;
-
-    // 192.0.2.0/24 (Documentation / TEST-NET-1)
-    if (o1 === 192 && o2 === 0 && o3 === 2) return true;
-
-    // 192.168.0.0/16 (Private-Use: 192.168.0.0 - 192.168.255.255)
-    if (o1 === 192 && o2 === 168) return true;
-
-    // 198.18.0.0/15 (Benchmarking: 198.18.0.0 - 198.19.255.255)
-    if (o1 === 198 && (o2 === 18 || o2 === 19)) return true;
-
-    // 198.51.100.0/24 (Documentation / TEST-NET-2)
-    if (o1 === 198 && o2 === 51 && o3 === 100) return true;
-
-    // 203.0.113.0/24 (Documentation / TEST-NET-3)
-    if (o1 === 203 && o2 === 0 && o3 === 113) return true;
-
-    // 224.0.0.0/4 (Multicast: 224.0.0.0 - 239.255.255.255)
-    if (o1 >= 224 && o1 <= 239) return true;
-
-    // 240.0.0.0/4 (Reserved for Future Use / Broadcast: 240.0.0.0 - 255.255.255.255)
-    if (o1 >= 240) return true;
-
-    return false;
-  }
-
-  // Check IPv6
-  const lowIp = ip.toLowerCase();
-
-  // Unspecified :: or 0:0:0:0:0:0:0:0
-  if (lowIp === '::' || lowIp === '0:0:0:0:0:0:0:0') return true;
-
-  // Loopback ::1 or 0:0:0:0:0:0:0:1
-  if (lowIp === '::1' || lowIp === '0:0:0:0:0:0:0:1') return true;
-
-  // Link-Local unicast: fe80::/10 (fe80:... to febf:...)
-  if (/^fe[89ab][0-9a-f]:/i.test(lowIp) || lowIp.startsWith('fe80:')) return true;
-
-  // Unique Local Address (ULA): fc00::/7 (fc00:... to fdff:...)
-  if (/^f[cd][0-9a-f]{2}:/i.test(lowIp) || lowIp.startsWith('fc00:') || lowIp.startsWith('fd00:')) return true;
-
-  // Multicast: ff00::/8
-  if (lowIp.startsWith('ff')) return true;
-
-  // Documentation: 2001:db8::/32
-  if (lowIp.startsWith('2001:db8:') || lowIp.startsWith('2001:0db8:')) return true;
-
-  // 6to4 relay (2002::/16) - check if mapped IPv4 is private
-  if (lowIp.startsWith('2002:')) {
-    const parts = lowIp.split(':');
-    if (parts.length >= 3) {
-      const high = parseInt(parts[1], 16);
-      const low = parseInt(parts[2], 16);
-      if (!isNaN(high) && !isNaN(low)) {
-        const b1 = (high >> 8) & 0xff;
-        const b2 = high & 0xff;
-        const b3 = (low >> 8) & 0xff;
-        const b4 = low & 0xff;
-        if (isPrivateOrBlockedIP(`${b1}.${b2}.${b3}.${b4}`)) return true;
-      }
-    }
-  }
-
-  return false;
 }
 
 /**
@@ -852,21 +715,7 @@ export class WebhookProcessor extends WorkerHost {
 
   async isInternalHost(url: string): Promise<boolean> {
     try {
-      const parsed = new URL(url);
-      const hostname = parsed.hostname;
-      if (isIP(hostname) !== 0) return isPrivateOrBlockedIP(hostname);
-
-      const [ips4, ips6] = await Promise.all([
-        resolve4(hostname).catch(() => [] as string[]),
-        resolve6(hostname).catch(() => [] as string[]),
-      ]);
-
-      const allIPs = [...ips4, ...ips6];
-      if (allIPs.length === 0) {
-        const result = await lookup(hostname, { all: true }).catch(() => []);
-        return result.length === 0 || result.some((r) => isPrivateOrBlockedIP(r.address));
-      }
-      return allIPs.some((ip) => isPrivateOrBlockedIP(ip));
+      return await isInternalHost(new URL(url).hostname);
     } catch {
       return true;
     }

@@ -1,6 +1,6 @@
 {
   "name": "@tuwaio/shared",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "author": "Oleksandr Tkach",
   "license": "Apache-2.0",
   "private": false,
@@ -46,6 +46,11 @@
       "types": "./dist/crash-injection.d.ts",
       "import": "./dist/crash-injection.js",
       "require": "./dist/crash-injection.cjs"
+    },
+    "./ssrf": {
+      "types": "./dist/ssrf.d.ts",
+      "import": "./dist/ssrf.js",
+      "require": "./dist/ssrf.cjs"
     }
   },
   "scripts": {

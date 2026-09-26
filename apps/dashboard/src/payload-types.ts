@@ -411,7 +411,7 @@ export interface App {
    */
   alchemyApiKey?: string | null;
   /**
-   * Optional. URL or token. Applied if Alchemy is not configured. A bare token also requires QuickNode App Name below — the endpoint URL is built from the two together.
+   * Optional. URL or token. Applied if Alchemy is not configured. A URL must point to a public host (https:// in production). A bare token also requires QuickNode App Name below — the endpoint URL is built from the two together.
    */
   quickNodeApiKey?: string | null;
   /**

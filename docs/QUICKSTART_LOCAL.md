@@ -267,8 +267,8 @@ To receive webhooks locally from containerized Quasar services:
 
 > [!TIP]
 > **SSRF Protection in Local Development**:  
-> Quasar enforces strict SSRF and tarpit protection (`WebhookProcessor.isPrivateOrBlockedIP`), blocking private/internal IP ranges by default in production.  
-> In local development and minimal profiles, `ALLOW_INTERNAL_WEBHOOKS=true` is set in the Quasar environment, enabling webhook deliveries to loopback and private subnets (`host.docker.internal`, `127.0.0.1`, RFC 1918).
+> Quasar enforces strict SSRF and tarpit protection (`@tuwaio/shared/ssrf`), refusing private/internal IP ranges for webhook endpoints and for App RPC overrides, QuickNode URLs and bundler URLs.  
+> In local development and minimal profiles, `ALLOW_INTERNAL_WEBHOOKS=true` is set in the Quasar environment. It allows webhook deliveries and RPC calls to loopback and private subnets (`host.docker.internal`, `127.0.0.1`, RFC 1918), so an App RPC override such as `http://host.docker.internal:8545` can reach a local node.
 
 ### 6.4 SIWX (Sign-In With X) Local Port Alignment
 

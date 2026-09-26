@@ -16,6 +16,7 @@ import * as chains from 'viem/chains';
 import { getAlchemyKey } from '../../constants';
 import * as schema from '../../database/schema/index';
 import { alchemyNetworkMap } from '../../lib/generated/alchemyNetworkMap';
+import { isUsableRpcUrl } from './rpc-guard';
 
 /** Maximum number of cached Wagmi configs. Prevents unbounded memory growth in long-running pods. */
 const CONFIG_CACHE_MAX_SIZE = 500;
@@ -84,10 +85,17 @@ export async function processPimlicoTx(
   const pimlicoApiKey =
     evmTx.pimlicoApiKey || (app?.pimlicoApiKey ? decrypt(app.pimlicoApiKey) : '') || process.env.PIMLICO_API_KEY || '';
 
+  // A bundler URL from the sync request body replaces the Pimlico endpoint, so it passes the same
+  // outbound check as an App RPC override. A rejected one falls back to Pimlico.
+  const clientBundlerUrl =
+    evmTx.bundlerUrl && (await isUsableRpcUrl(evmTx.bundlerUrl, '[PIMLICO TRACKER]', 'Client Bundler'))
+      ? evmTx.bundlerUrl
+      : undefined;
+
   const bundlerUrl = createPimlicoRpcUrl({
     chainId,
     apiKey: pimlicoApiKey || undefined,
-    bundlerUrl: evmTx.bundlerUrl || undefined,
+    bundlerUrl: clientBundlerUrl,
   });
 
   // 4. Collect all available EVM RPCs for on-chain stage in priority order
@@ -100,10 +108,13 @@ export async function processPimlicoTx(
     .from(schema.appsRpcConfigs)
     .where(and(eq(schema.appsRpcConfigs.parentId, appId), eq(schema.appsRpcConfigs.chainId, chainId.toString())));
 
-  appConfigs.forEach((c) => {
-    rpcUrls.push(decrypt(c.rpcUrl));
-    sources.push('App Overwrite');
-  });
+  for (const c of appConfigs) {
+    const url = decrypt(c.rpcUrl);
+    if (await isUsableRpcUrl(url, '[PIMLICO TRACKER]', 'App Overwrite')) {
+      rpcUrls.push(url);
+      sources.push('App Overwrite');
+    }
+  }
 
   // B. App-specific Alchemy
   const alchemyNetwork = alchemyNetworkMap[chainId];
@@ -119,8 +130,10 @@ export async function processPimlicoTx(
     const url = decryptedQuickNodeKey.startsWith('http')
       ? decryptedQuickNodeKey
       : `https://${app.quickNodeAppName}.quiknode.pro/${decryptedQuickNodeKey}/`;
-    rpcUrls.push(url);
-    sources.push('App QuickNode');
+    if (await isUsableRpcUrl(url, '[PIMLICO TRACKER]', 'App QuickNode')) {
+      rpcUrls.push(url);
+      sources.push('App QuickNode');
+    }
   }
 
   // D. System Alchemy Fallback
@@ -140,7 +153,10 @@ export async function processPimlicoTx(
     throw new Error(`[PIMLICO TRACKER] No valid RPC URLs found for chain ${chainId}`);
   }
 
-  const cacheKey = `${chainId}:${rpcUrls.sort().join(',')}`;
+  // fallback() tries the transports in array order, so the order is part of the config: the same
+  // URLs in another priority must not share a cache entry. Sorting here once reordered `rpcUrls`
+  // in place and put the system Alchemy key ahead of the app's own RPC.
+  const cacheKey = `${chainId}:${rpcUrls.join(',')}`;
   let config = getCachedConfig(cacheKey);
   if (!config) {
     config = createConfig({

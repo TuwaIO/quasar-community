@@ -19,11 +19,33 @@ Quasar Community Edition is a **self-hosted, single-tenant transaction indexing 
 ### Live Community Showcase
 
 TUWA runs a public demonstration stand built from this exact tree — the same
-generated snapshot, the same `infra/` compose topology, the same images:
-- **Administrative Dashboard (/admin):** [https://community-stg.tuwa.io](https://community-stg.tuwa.io)
-- **Engine Monitoring & Health Endpoint:** [https://api-community-stg.tuwa.io/v1/engine/monitoring/health](https://api-community-stg.tuwa.io/v1/engine/monitoring/health)
+generated snapshot, the same `infra/` compose topology, the same images. Sign
+in and look around before running your own node:
 
-You can explore the self-hosted Payload CMS administration and high-throughput NestJS API in real-time before running your own node.
+| | |
+| :--- | :--- |
+| **Admin panel** | [https://community-stg.tuwa.io/admin](https://community-stg.tuwa.io/admin) |
+| **Email** | `demo@tuwa.io` |
+| **Password** | `UZPqbA-TRtn4e-ZyKAjb` |
+| **Engine health** | [https://api-community-stg.tuwa.io/v1/engine/monitoring/health](https://api-community-stg.tuwa.io/v1/engine/monitoring/health) |
+
+**Demo App** comes pre-seeded: open **Transactions** for the Sepolia
+transactions the engine tracked for it, and **Webhook Deliveries** for the
+signed callbacks it sent about them. Create an app of your own to get API keys,
+and set `baseUrl: 'https://api-community-stg.tuwa.io'` in `@tuwaio/quasar-sdk`
+to try the engine API.
+
+It is a **shared public sandbox**:
+
+- every visitor signs in to the same account and sees what the others created;
+- all data is wiped and re-seeded every day at 03:00 UTC;
+- the account's email, password and two-factor settings are locked, webhook
+  endpoints are read-only, and the workspace cannot be edited or deleted;
+- anything you enter is visible to the next visitor — **never paste real API
+  keys, RPC URLs or provider keys**.
+
+Those restrictions are enforced by TUWA's reverse proxy in front of the stand,
+not by this code. A node you run yourself has none of them.
 
 Two caveats, so the stand is not mistaken for something it is not. It is
 **deployed by TUWA's own pipeline, not by this repository's** — the `deploy`
@@ -43,7 +65,7 @@ of the edition rather than an uptime-backed service.
 - **SSRF-Protected Webhooks**: Webhook delivery worker with DNS resolution validation against private IP ranges, tarpit timeouts, and HMAC-SHA256 signature verification.
 - **Full Payload CMS Administration**: Self-hosted administrative back-office mounted at `/admin` for managing API keys, inspecting transaction logs, and configuring webhook delivery endpoints.
 - **Single-Tenant Authentication**: Strictly **Native Payload Auth** (email and password credentials) reinforced with **TOTP Two-Factor Authentication (2FA)**. Zero SIWX / CAIP-122 wallet overhead, zero passkeys, zero third-party OAuth, and zero external email dependencies.
-- **Pure Self-Custody**: Runs 100% locally or on your own VPS/Bare-Metal server via Docker Compose with Traefik ingress and optional Cloudflare Tunnels. Zero external cloud vendor lock-in.
+- **Pure Self-Custody**: Runs locally or on your own VPS/bare-metal server via Docker Compose with Traefik ingress and optional Cloudflare Tunnels — no managed cloud services required.
 
 ### Technology Stack
 

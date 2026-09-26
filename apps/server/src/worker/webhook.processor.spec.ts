@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { QUOTA_DEFAULTS } from '@tuwaio/shared/constants';
+import { isPrivateOrBlockedIP, normalizeIP } from '@tuwaio/shared/ssrf';
 import { getToken } from '@willsoto/nestjs-prometheus';
 import { Job } from 'bullmq';
 import * as http from 'http';
@@ -14,7 +15,7 @@ import * as zlib from 'zlib';
 import { WEBHOOK_DELIVERY_METRIC, WEBHOOK_LATENCY_METRIC } from '../constants';
 import { DRIZZLE } from '../database/database.module';
 import { REDIS } from '../redis/redis.module';
-import { isPrivateOrBlockedIP, normalizeIP, redactUrl, WebhookProcessor } from './webhook.processor';
+import { redactUrl, WebhookProcessor } from './webhook.processor';
 
 // Mock DNS resolution to control SSRF behavior
 const mockResolve4 = vi.fn();

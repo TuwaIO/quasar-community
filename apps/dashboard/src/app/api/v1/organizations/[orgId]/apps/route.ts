@@ -190,6 +190,11 @@ export const POST = withRateLimit(async (req: Request, { params }: { params: Pro
       { status: 201 },
     );
   } catch (error: any) {
+    // Payload errors carry their status. The Apps collection answers 400 for a rejected RPC URL
+    // or QuickNode endpoint, and the message says which one.
+    if (typeof error?.status === 'number' && error.status >= 400 && error.status < 500) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error('[Dashboard] Create App Error:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }

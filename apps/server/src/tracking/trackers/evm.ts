@@ -15,6 +15,7 @@ import * as chains from 'viem/chains';
 import { getAlchemyKey } from '../../constants';
 import * as schema from '../../database/schema/index';
 import { alchemyNetworkMap } from '../../lib/generated/alchemyNetworkMap';
+import { isUsableRpcUrl } from './rpc-guard';
 
 /** Maximum number of cached Wagmi configs. Prevents unbounded memory growth in long-running pods. */
 const CONFIG_CACHE_MAX_SIZE = 500;
@@ -77,10 +78,13 @@ export async function processEvmTx(
     .from(schema.appsRpcConfigs)
     .where(and(eq(schema.appsRpcConfigs.parentId, appId), eq(schema.appsRpcConfigs.chainId, chainId.toString())));
 
-  appConfigs.forEach((c) => {
-    rpcUrls.push(decrypt(c.rpcUrl));
-    sources.push('App Overwrite');
-  });
+  for (const c of appConfigs) {
+    const url = decrypt(c.rpcUrl);
+    if (await isUsableRpcUrl(url, '[EVM TRACKER]', 'App Overwrite')) {
+      rpcUrls.push(url);
+      sources.push('App Overwrite');
+    }
+  }
 
   // B. App-specific Alchemy
   const alchemyNetwork = alchemyNetworkMap[chainId];
@@ -96,8 +100,10 @@ export async function processEvmTx(
     const url = decryptedQuickNodeKey.startsWith('http')
       ? decryptedQuickNodeKey
       : `https://${app.quickNodeAppName}.quiknode.pro/${decryptedQuickNodeKey}/`;
-    rpcUrls.push(url);
-    sources.push('App QuickNode');
+    if (await isUsableRpcUrl(url, '[EVM TRACKER]', 'App QuickNode')) {
+      rpcUrls.push(url);
+      sources.push('App QuickNode');
+    }
   }
 
   // D. System Alchemy Fallback
@@ -126,7 +132,10 @@ export async function processEvmTx(
     `[EVM TRACKER] Starting for ${tx.txKey} on chain ${tx.chainId} using RPC: ...${primaryRpcUrl.slice(-12)}`,
   );
 
-  const cacheKey = `${chainId}:${rpcUrls.sort().join(',')}`;
+  // fallback() tries the transports in array order, so the order is part of the config: the same
+  // URLs in another priority must not share a cache entry. Sorting here once reordered `rpcUrls`
+  // in place and put the system Alchemy key ahead of the app's own RPC.
+  const cacheKey = `${chainId}:${rpcUrls.join(',')}`;
   let config = getCachedConfig(cacheKey);
   if (!config) {
     config = createConfig({

@@ -144,6 +144,11 @@ export const PATCH = withRateLimit(
       const a = updatedApp as unknown as App;
       return NextResponse.json(sanitizeApp(a));
     } catch (error: any) {
+      // Payload errors carry their status. The Apps collection answers 400 for a rejected RPC URL
+      // or QuickNode endpoint, and the message says which one.
+      if (typeof error?.status === 'number' && error.status >= 400 && error.status < 500) {
+        return NextResponse.json({ error: error.message }, { status: error.status });
+      }
       console.error('[Dashboard] Update App Error:', error);
       return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
     }

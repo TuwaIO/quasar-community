@@ -47,6 +47,10 @@ export interface AppFull {
   environment: string | null;
   secretKey: string | null;
   publicKey: string | null;
+  /**
+   * The organization's active RPS limit (`organizations.rps_limit`), copied
+   * here when the app is hydrated. `apps` has no RPS column of its own.
+   */
   rpsLimit: string | number | null;
   ownerEmail: string | null;
   ownerName: string | null;
@@ -207,14 +211,21 @@ export class IronDomeGuard implements CanActivate {
     }
 
     // 2. DB Fallback (Hydration)
+    //
+    // The organization is loaded for its RPS limit and for the address
+    // low-quota alerts go to, and nothing else — so its columns are named.
+    // Loading whole rows put every member's password hash, salt, reset token
+    // and 2FA secret into the `:meta` cache entry below.
     const appRaw = await (this.db.query as any).apps.findFirst({
       where: (apps: any, { or, eq }: any) => or(eq(apps.publicKey, apiKey), eq(apps.secretKeyHash, lookupKey)),
       with: {
         organization: {
+          columns: { rpsLimit: true, createdBy: true },
           with: {
             organizationMembers: {
+              columns: { role: true },
               with: {
-                user: true,
+                user: { columns: { email: true, name: true } },
               },
             },
           },
@@ -226,13 +237,15 @@ export class IronDomeGuard implements CanActivate {
 
     if (!appRaw) return null;
 
+    const { organization, appsIpWhitelists, appsDomainsWhitelists, ...appColumns } = appRaw;
+
     let ownerEmail: string | null = null;
     let ownerName: string | null = null;
 
-    if (appRaw.organization?.organizationMembers) {
-      const ownerMember = appRaw.organization.organizationMembers.find((m: any) => m.role === 'owner');
-      const adminMember = appRaw.organization.organizationMembers.find((m: any) => m.role === 'admin');
-      const fallbackMember = appRaw.organization.organizationMembers[0];
+    if (organization?.organizationMembers) {
+      const ownerMember = organization.organizationMembers.find((m: any) => m.role === 'owner');
+      const adminMember = organization.organizationMembers.find((m: any) => m.role === 'admin');
+      const fallbackMember = organization.organizationMembers[0];
 
       const responsibleMember = ownerMember || adminMember || fallbackMember;
 
@@ -242,11 +255,11 @@ export class IronDomeGuard implements CanActivate {
       }
     }
 
-    if (!ownerEmail && appRaw.organization?.createdBy) {
+    if (!ownerEmail && organization?.createdBy) {
       const [creatorUser] = await this.db
         .select({ email: schema.users.email, name: schema.users.name })
         .from(schema.users)
-        .where(eq(schema.users.id, appRaw.organization.createdBy))
+        .where(eq(schema.users.id, organization.createdBy))
         .limit(1);
 
       if (creatorUser) {
@@ -261,12 +274,16 @@ export class IronDomeGuard implements CanActivate {
     }
 
     const fullApp = {
-      ...appRaw,
+      ...appColumns,
       organizationId: appRaw.organizationId,
+      // Cached with the rest, so a change to the organization's limit has to
+      // drop this entry: the outbox `sync-redis-quota` event does it in the
+      // engine, and `invalidateOrganizationAppMetadata` in the dashboard.
+      rpsLimit: organization?.rpsLimit ?? null,
       ownerEmail,
       ownerName,
-      ipWhitelist: appRaw.appsIpWhitelists.map((i: any) => i.ip),
-      domainsWhitelist: appRaw.appsDomainsWhitelists.map((d: any) => d.domain),
+      ipWhitelist: appsIpWhitelists.map((i: any) => i.ip),
+      domainsWhitelist: appsDomainsWhitelists.map((d: any) => d.domain),
     };
 
     // 3. Save to Cache (TTL: 5 minutes)
@@ -319,7 +336,10 @@ export class IronDomeGuard implements CanActivate {
     }
 
     const { organizationId } = app;
-    const rpsLimit = typeof app.rpsLimit === 'string' ? parseInt(app.rpsLimit) : (app.rpsLimit ?? 1);
+    // Fail closed: a limit that does not parse must not read as "no limit",
+    // which is what `rpsCount > NaN` would make it.
+    const parsedRpsLimit = typeof app.rpsLimit === 'string' ? parseInt(app.rpsLimit, 10) : (app.rpsLimit ?? 1);
+    const rpsLimit = Number.isFinite(parsedRpsLimit) ? parsedRpsLimit : 1;
 
     const now = Date.now();
     const rpsKey = `{${organizationId}}:rps:${Math.floor(now / 1000)}`;

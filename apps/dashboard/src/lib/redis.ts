@@ -2,6 +2,7 @@ import { resolveEnvUrl } from '@tuwaio/shared/utils';
 import { Queue } from 'bullmq';
 import crypto from 'crypto';
 import Redis from 'ioredis';
+import type { Payload } from 'payload';
 
 import { QUEUE_FAST, QUEUE_LAZY } from '../../constants';
 
@@ -223,6 +224,34 @@ export const getMetadataKey = (apiKey: string) => `{${apiKey}}:meta`;
  * format: {orgId}:limit
  */
 export const getLimitKey = (orgId: string) => `{${orgId}}:limit`;
+
+/**
+ * Drops the IronDome metadata cache of every app in an organization.
+ *
+ * IronDomeGuard copies the organization's `rpsLimit` into each app's
+ * `{…}:meta` entry when it hydrates it, so anything that changes the limit
+ * must call this — otherwise the engine keeps enforcing the old one until the
+ * entry expires (5 minutes). The engine's own writers (rps-expiration cron,
+ * billing webhook) do the same through the `sync-redis-quota` outbox event.
+ */
+export async function invalidateOrganizationAppMetadata(payload: Payload, organizationId: string): Promise<void> {
+  const { docs } = await payload.find({
+    collection: 'apps',
+    where: { organization: { equals: organizationId } },
+    select: { secretKeyHash: true, publicKey: true },
+    depth: 0,
+    pagination: false,
+    overrideAccess: true,
+  });
+  if (docs.length === 0) return;
+
+  const pipeline = redisApi.pipeline();
+  for (const app of docs) {
+    if (app.secretKeyHash) pipeline.del(getMetadataKey(app.secretKeyHash));
+    if (app.publicKey) pipeline.del(getMetadataKey(app.publicKey));
+  }
+  await pipeline.exec();
+}
 
 // --- SECRET HELPERS ---
 

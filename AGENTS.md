@@ -16,7 +16,7 @@
 | **The Iron Dome**       | Dual-Layer security. Next.js Middleware for Payload Admin/Auth. NestJS Fastify Guard for high-performance Engine APIs. |
 | **Single-Admin Scoping**| Self-hosted single-tenant / Personal Workspace model. Queries are scoped by `organizationId`.                   |
 | **Machine-Only Writes** | Transaction data is written exclusively by Pulsar Sync clients via documented API endpoints (`/v1/engine/*`).   |
-| **Self-Sovereignty**    | 100% self-hosted on bare metal or VPS via Docker Compose. Zero cloud provider lock-in, zero external SaaS telemetry. |
+| **Self-Sovereignty**    | 100% self-hosted on bare metal or VPS via Docker Compose. No managed cloud services required, zero external SaaS telemetry. |
 
 ### Tech Stack
 
@@ -228,7 +228,25 @@ routes, `src/tests/admin-retry-buttons.test.tsx` the admin buttons, and
 
 ### SSRF/Tarpit Protection
 
-`WebhookDispatcherService` resolves all host IPs (`dns.resolve4/6`) and validates them against internal blacklists before any outbound request. A strict 10s hard timeout is enforced.
+Every outbound request to a URL that a customer or an API caller chose passes
+`@tuwaio/shared/ssrf` (`packages/shared/src/ssrf.ts`): http(s) only, https in
+production, and every address the host resolves to (system resolver plus A and
+AAAA records) must be public. IP literals in any encoding, `localhost` and names
+that do not resolve are refused. Never call such a URL without it.
+
+| URL | Where it is checked |
+| :--- | :--- |
+| Webhook endpoint | `WebhookProcessor` before each hop, again in the connect-time DNS hook and on the socket's peer address. 10 s hard timeout. |
+| App RPC override (`rpcConfigs`), QuickNode URL or app name | The Apps collection at write time (400 with the reason), and each tracker before use (`trackers/rpc-guard.ts`), which skips a rejected one and falls through to the next provider. |
+| `bundlerUrl` from the sync body | The Pimlico tracker, which falls back to the Pimlico endpoint. |
+
+`rpcUrl` from the sync body is stored on the transaction and never called: it
+let any API key holder aim the worker at any host. `ALLOW_INTERNAL_WEBHOOKS=true`
+lifts the private-address and https checks for webhooks and RPC endpoints
+alike. It exists for local development and stays off in every deployment.
+
+The tracker check runs before the request, so a DNS answer that changes in
+between is not covered. Only the webhook path pins the address at connect time.
 
 ---
 

@@ -103,7 +103,7 @@ export const Organizations: CollectionConfig = {
       },
     ],
     afterChange: [
-      async ({ doc, operation, req }) => {
+      async ({ doc, operation, previousDoc, req }) => {
         // Auto-create owner membership
         if (operation === 'create' && req.user?.id) {
           // Prevent recursion if this was triggered internally
@@ -142,6 +142,17 @@ export const Organizations: CollectionConfig = {
             2000,
             'Organizations-Sync',
           ).catch((err) => console.error('[Organizations] Redis sync failed:', (err as Error).message));
+        }
+
+        // --- RPS limit: IronDome caches it per app, not per organization ---
+        // Covers an admin edit, the RPS adjust route and the seed raising a
+        // workspace to its limits; without it the engine would keep the old
+        // limit until each app's `{…}:meta` entry expired.
+        if (operation === 'update' && Number(previousDoc?.rpsLimit) !== Number(doc.rpsLimit)) {
+          const { bgRedisSync, invalidateOrganizationAppMetadata } = await import('@/lib/redis');
+          bgRedisSync(req.payload.logger, 'Organizations-RpsSync', () =>
+            invalidateOrganizationAppMetadata(req.payload, doc.id),
+          );
         }
       },
     ],

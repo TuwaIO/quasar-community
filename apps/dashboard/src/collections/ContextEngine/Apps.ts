@@ -1,12 +1,19 @@
 import { QUOTA_DEFAULTS } from '@tuwaio/shared/constants';
 import { createId } from '@tuwaio/shared/cuid';
 import { encrypt } from '@tuwaio/shared/encryption';
+import { assertSafeOutboundUrl, outboundUrlPolicyFromEnv, UnsafeUrlError } from '@tuwaio/shared/ssrf';
 import crypto from 'crypto';
 import type { CollectionConfig } from 'payload';
+import { APIError } from 'payload';
 
 import { isMemberOfOrganization, isOrgAdminOrOwner } from '@/lib/access';
 import { redisApi } from '@/lib/redis';
 import type { App } from '@/payload-types';
+
+// Dot-separated labels. The engine puts the name in front of `.quiknode.pro`, so any character
+// that ends a host (`/`, `#`, `?`, `@`, `:`) would let it replace the host: `169.254.169.254#`
+// sends the tracker to the cloud metadata service.
+const QUICKNODE_APP_NAME = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/i;
 
 const generateKey = (prefix: string) => {
   const buffer = crypto.randomBytes(24);
@@ -213,6 +220,7 @@ export const Apps: CollectionConfig = {
       admin: {
         description:
           'Optional. URL or token. Applied if Alchemy is not configured. ' +
+          'A URL must point to a public host (https:// in production). ' +
           'A bare token also requires QuickNode App Name below — the endpoint URL is built from the two together.',
         components: {
           Field: {
@@ -238,6 +246,9 @@ export const Apps: CollectionConfig = {
       // app just falls through to the next RPC source, and the operator is left
       // believing they configured a provider that was never used.
       validate: (value: unknown, { siblingData }: { siblingData?: Record<string, unknown> }) => {
+        if (typeof value === 'string' && value !== '' && !QUICKNODE_APP_NAME.test(value)) {
+          return 'Letters, digits, hyphens, underscores and dots only: the part of your QuickNode endpoint before .quiknode.pro.';
+        }
         const key = siblingData?.quickNodeApiKey;
         if (!key) return true;
         // A full URL carries its own host, so no subdomain is needed.
@@ -398,6 +409,26 @@ export const Apps: CollectionConfig = {
           const prefix = data.environment === 'live' ? 'live_' : 'test_';
           if (!data.publicKey) data.publicKey = generateKey(`pk_${prefix}`);
           if (!data.secretKey) data.secretKey = generateKey(`sk_${prefix}`);
+        }
+
+        // The engine sends JSON-RPC to these URLs from inside the cluster. Refuse private and
+        // loopback hosts here, where the admin sees why, rather than leave the tracker to skip
+        // them. A value that still starts with `qenc:` was kept from the stored document.
+        const outboundPolicy = outboundUrlPolicyFromEnv();
+        const assertPublicUrl = async (value: unknown, label: string) => {
+          if (typeof value !== 'string' || value.startsWith('qenc:')) return;
+          try {
+            await assertSafeOutboundUrl(value, outboundPolicy);
+          } catch (error) {
+            if (error instanceof UnsafeUrlError) throw new APIError(`${label} rejected: ${error.message}.`, 400);
+            throw error;
+          }
+        };
+        for (const config of data.rpcConfigs ?? []) {
+          await assertPublicUrl(config?.rpcUrl, `RPC URL for chain ${config?.chainId}`);
+        }
+        if (typeof data.quickNodeApiKey === 'string' && data.quickNodeApiKey.startsWith('http')) {
+          await assertPublicUrl(data.quickNodeApiKey, 'QuickNode endpoint URL');
         }
 
         // Encrypt sensitive fields
