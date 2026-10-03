@@ -75,7 +75,7 @@ export class RedisCleanupService {
   }
 
   /**
-   * Daily garbage collection of orphaned Iron Dome Redis keys.
+   * Daily garbage collection of orphaned engine guard Redis keys.
    *
    * Removes `{orgId}:limit`, `{orgId}:usage`, and `{appId}:notified_low_quota`
    * keys belonging to deleted organizations/apps that no longer exist in the DB.

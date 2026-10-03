@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccess } from '@/lib/auth-utils';
 import { getUserOrgRole } from '@/lib/organizations';
+import { parsePagination } from '@/lib/pagination';
 import type { App } from '@/payload-types';
 
 // Validation Schema
@@ -49,8 +50,7 @@ export const GET = withRateLimit(async (req: Request, { params }: { params: Prom
 
     // 3. Fetch Apps for the target organizations
     const { searchParams } = new URL(req.url);
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '10');
+    const { page, limit } = parsePagination(searchParams);
     const search = searchParams.get('search');
     const environment = searchParams.get('environment');
 

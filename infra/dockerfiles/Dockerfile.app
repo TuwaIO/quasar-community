@@ -124,8 +124,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Remove global package manager from runtime image to eliminate attack surface & bundled CVEs
-RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /root/.npm
+# Remove the global package managers from the runtime image to eliminate attack surface & bundled CVEs: npm, and the
+# pnpm that corepack prepared in the base stage (its cache bundles its own undici)
+RUN corepack disable && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /root/.npm /root/.cache/node/corepack
 
 # Create a system user for security
 RUN groupadd --system --gid 1001 nodejs && \

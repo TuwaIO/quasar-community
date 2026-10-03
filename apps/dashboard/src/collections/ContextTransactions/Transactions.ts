@@ -75,14 +75,14 @@ const F = {
 } satisfies TransactionFieldMap;
 
 // ---------------------------------------------------------------------------
-// 2. Auth Logic (Iron Dome Integration)
+// 2. Auth Logic (Engine Guard Integration)
 // ---------------------------------------------------------------------------
 
 /**
  * Resolves the authentication context for the request.
  */
 async function resolveAuthContext(req: PayloadRequest): Promise<ProxyMetadata> {
-  // A. PROXY PATH (Production / Iron Dome)
+  // A. PROXY PATH (Production / engine guard)
   const proxyMeta = req.headers.get(TUWA_HEADERS.METADATA);
   const proxySignature = req.headers.get(TUWA_HEADERS.METADATA_SIGNATURE);
   const metadataSecret = await getInternalSecret();

@@ -1,8 +1,6 @@
 import configPromise from '@payload-config';
-import crypto from 'crypto';
 import { desc, eq, lt } from 'drizzle-orm';
-import jwt from 'jsonwebtoken';
-import { getPayload } from 'payload';
+import { getFieldsToSign, getPayload, jwtSign, type PayloadRequest } from 'payload';
 
 import { users_sessions } from '@/payload-generated-schema';
 import type { User } from '@/payload-types';
@@ -49,22 +47,22 @@ export const createPayloadSession = async (user: User, sid: string) => {
   }
 };
 
-const secret = crypto
-  .createHash('sha256')
-  .update(process.env.PAYLOAD_SECRET ?? '')
-  .digest('hex')
-  .slice(0, 32);
-
-export const generateSignToken = (user: User, sid: string) => {
-  return jwt.sign(
-    {
-      id: user.id,
-      collection: 'users',
+/**
+ * Signs the `payload-token` of a session made by {@link createPayloadSession}, as Payload's own login does: the
+ * `saveToJWT` fields of the users collection, the session ID, and the `authVersion` protected header that Payload
+ * checks since 3.90 (a token without it authenticates nobody). Signed with `payload.secret`.
+ */
+export const generateSignToken = async (user: User, sid: string): Promise<string> => {
+  const payload = await getPayload({ config: configPromise });
+  const { token } = await jwtSign({
+    fieldsToSign: getFieldsToSign({
+      collectionConfig: payload.collections.users.config,
       email: user.email,
-      sid, // Session ID is critical for revocation
-      roles: user.roles,
-    },
-    secret,
-    { expiresIn: TOKEN_EXPIRATION, algorithm: 'HS256' },
-  );
+      sid,
+      user: { ...user, collection: 'users' } as PayloadRequest['user'],
+    }),
+    secret: payload.secret,
+    tokenExpiration: TOKEN_EXPIRATION,
+  });
+  return token;
 };

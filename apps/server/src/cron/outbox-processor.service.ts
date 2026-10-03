@@ -73,9 +73,9 @@ export class OutboxProcessorService extends WorkerHost {
           const { organizationId, quotaToAdd, newRps } = data;
 
           if (organizationId) {
-            // 1. Bust the Iron Dome RPS limit cache for the whole organization
+            // 1. Bust the engine guard RPS limit cache for the whole organization
             await this.redis.del(`{${organizationId}}:limit`);
-            this.logger.log(`[OutboxProcessor] Busted Iron Dome cache: {${organizationId}}:limit`);
+            this.logger.log(`[OutboxProcessor] Busted engine guard cache: {${organizationId}}:limit`);
 
             // 2. Fetch all apps for this organization to update their individual redis caches
             const orgApps = await this.db

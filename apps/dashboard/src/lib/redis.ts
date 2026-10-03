@@ -10,13 +10,22 @@ import { QUEUE_FAST, QUEUE_LAZY } from '../../constants';
 const uiRedisUrl = resolveEnvUrl(process.env.REDIS_UI_URL || '');
 const isUiCluster = process.env.REDIS_UI_MODE === 'cluster';
 
-// API Redis: BullMQ queues, IronDome, transaction tracking (shared with NestJS engine)
+// API Redis: BullMQ queues, EngineGuard, transaction tracking (shared with NestJS engine)
 const apiRedisUrl = resolveEnvUrl(process.env.REDIS_API_URL || '');
 const isApiCluster = process.env.REDIS_API_MODE === 'cluster';
 
 // ── Factory Functions ────────────────────────────────────────────────────────
 
-function createRedisInstance(url: string, isCluster: boolean, label: string): Redis {
+// How long a new client queues commands while it makes its first connection
+const STARTUP_QUEUE_MS = 10_000;
+
+/**
+ * Creates a Redis or Redis Cluster client. It fails fast (no offline queue), except while it makes its first
+ * connection: requests that arrive right after a cold start or a dev reload would otherwise fail with "Stream isn't
+ * writeable" before the client is connected. The queue closes on the first `ready`, or after 10 s if Redis is down.
+ * @internal Exported for tests.
+ */
+export function createRedisInstance(url: string, isCluster: boolean, label: string): Redis {
   // During Next.js build phase, we don't want to connect to Redis.
   // This avoids "ECONNREFUSED" errors and potential worker crashes during prerendering.
   if (process.env.NEXT_PHASE === 'phase-production-build') {
@@ -51,8 +60,8 @@ function createRedisInstance(url: string, isCluster: boolean, label: string): Re
           maxRetriesPerRequest: 3,
           connectTimeout: 5000,
         },
-        // Fail-fast to prevent memory blow-up when Redis is down
-        enableOfflineQueue: false,
+        // Fail-fast to prevent memory blow-up when Redis is down; open only until the first connection (see below)
+        enableOfflineQueue: true,
         // Allow more redirections during topology transitions (MOVED / ASKING).
         maxRedirections: 32,
         // Wait for cluster to finish LOADING / elect a new primary.
@@ -71,7 +80,8 @@ function createRedisInstance(url: string, isCluster: boolean, label: string): Re
   } else {
     instance = new Redis(url, {
       maxRetriesPerRequest: 3, // Fail fast!
-      enableOfflineQueue: false,
+      // Open only until the first connection (see below)
+      enableOfflineQueue: true,
       connectTimeout: 5000,
       retryStrategy(times: number) {
         return Math.min(times * 200, 2000);
@@ -82,6 +92,14 @@ function createRedisInstance(url: string, isCluster: boolean, label: string): Re
   instance.on('error', (err: Error) => {
     console.error('[%s] Connection error:', label, err.message);
   });
+
+  // ioredis reads `enableOfflineQueue` on every command: from here on, a command while disconnected fails at once
+  // instead of waiting in a queue that grows as long as Redis is down
+  const closeStartupQueue = () => {
+    instance.options.enableOfflineQueue = false;
+  };
+  instance.once('ready', closeStartupQueue);
+  setTimeout(closeStartupQueue, STARTUP_QUEUE_MS).unref?.();
 
   return instance;
 }
@@ -135,7 +153,7 @@ export const redis = createRedisInstance(uiRedisUrl, isUiCluster, 'Redis-UI');
 
 /**
  * API Redis instance — used by dashboard for BullMQ queue operations and
- * cross-cluster cache busting (e.g. IronDome metadata invalidation).
+ * cross-cluster cache busting (e.g. EngineGuard metadata invalidation).
  */
 export const redisApi = createRedisInstance(apiRedisUrl, isApiCluster, 'Redis-API');
 
@@ -211,7 +229,7 @@ export function getQueue(name: string): Queue {
   return queue;
 }
 
-// --- KEY HELPERS (Must match IronDomeGuard in NestJS) ---
+// --- KEY HELPERS (Must match EngineGuard in NestJS) ---
 
 /**
  * Metadata cache for API Keys
@@ -226,9 +244,9 @@ export const getMetadataKey = (apiKey: string) => `{${apiKey}}:meta`;
 export const getLimitKey = (orgId: string) => `{${orgId}}:limit`;
 
 /**
- * Drops the IronDome metadata cache of every app in an organization.
+ * Drops the EngineGuard metadata cache of every app in an organization.
  *
- * IronDomeGuard copies the organization's `rpsLimit` into each app's
+ * EngineGuard copies the organization's `rpsLimit` into each app's
  * `{…}:meta` entry when it hydrates it, so anything that changes the limit
  * must call this — otherwise the engine keeps enforcing the old one until the
  * entry expires (5 minutes). The engine's own writers (rps-expiration cron,

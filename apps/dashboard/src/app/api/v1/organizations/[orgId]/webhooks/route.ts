@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccess } from '@/lib/auth-utils';
+import { parsePagination } from '@/lib/pagination';
 import { formatWebhookError, isLocalhostUrl } from '@/lib/webhook-utils';
 import type { App, WebhookEndpoint } from '@/payload-types';
 
@@ -34,8 +35,7 @@ export const GET = withRateLimit(async (req: Request, { params }: { params: Prom
     const { searchParams } = new URL(req.url);
     const appId = searchParams.get('appId');
     const search = searchParams.get('search');
-    const page = parseInt(searchParams.get('page') || '1', 10);
-    const limit = parseInt(searchParams.get('limit') || '10', 10);
+    const { page, limit } = parsePagination(searchParams);
 
     const where: any = {
       'app.organization': { equals: orgId },

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccess } from '@/lib/auth-utils';
+import { parsePagination } from '@/lib/pagination';
 
 export const GET = withRateLimit(
   async (req: Request, { params }: { params: Promise<{ orgId: string; appId: string }> }) => {
@@ -21,8 +22,7 @@ export const GET = withRateLimit(
       }
 
       const { searchParams } = new URL(req.url);
-      const page = parseInt(searchParams.get('page') || '1', 10);
-      const limit = parseInt(searchParams.get('limit') || '10', 10);
+      const { page, limit } = parsePagination(searchParams);
 
       const results = await payload.find({
         collection: 'app-invoices',

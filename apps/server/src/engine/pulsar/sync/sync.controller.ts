@@ -24,6 +24,7 @@ import { z } from 'zod';
 import { PULSAR_TX_COUNT_METRIC } from '../../../constants';
 import { DRIZZLE } from '../../../database/database.constants';
 import * as schema from '../../../database/schema/index';
+import { solanaCaip2ChainId } from '../../../lib/solana-chain';
 import { REDIS } from '../../../redis/redis.constants';
 import { TrackingService } from '../../../tracking/tracking.service';
 
@@ -31,7 +32,7 @@ import { TrackingService } from '../../../tracking/tracking.service';
 // Types
 // ---------------------------------------------------------------------------
 
-interface IronDomeMeta {
+interface EngineMeta {
   id: string;
   status: 'active' | 'disabled' | 'suspended';
   isRevoked: boolean;
@@ -196,8 +197,8 @@ export class SyncController {
    * 4. Re-enqueue into {tracking-fast} queue.
    */
   @Post('retry/:txKey')
-  async retryTransaction(@Param('txKey') txKey: string, @Req() req: { ironDomeMeta: IronDomeMeta }) {
-    const meta = req.ironDomeMeta;
+  async retryTransaction(@Param('txKey') txKey: string, @Req() req: { engineMeta: EngineMeta }) {
+    const meta = req.engineMeta;
 
     if (!txKey || txKey.trim() === '') {
       throw new BadRequestException('txKey is required.');
@@ -264,10 +265,10 @@ export class SyncController {
   @Post()
   async syncTransaction(
     @Body() body: unknown,
-    @Req() req: { ironDomeMeta: IronDomeMeta },
+    @Req() req: { engineMeta: EngineMeta },
     @Res({ passthrough: true }) res: { status: (code: number) => void },
   ) {
-    const meta = req.ironDomeMeta;
+    const meta = req.engineMeta;
     const mode: 'fast' | 'lazy' = meta.trackMode === 'fast' ? 'fast' : 'lazy';
 
     // 1. Validate input
@@ -340,7 +341,7 @@ export class SyncController {
         return { success: true, txKey: existing.txKey, mode, duplicate: true };
       }
 
-      // 4. Create Transaction — owner is force-stamped from Iron Dome metadata
+      // 4. Create Transaction — owner is force-stamped from the engine guard metadata
       // Strip fields not present in DB schema & coerce to plain JSON-compatible types
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { isTrackedModalOpen: _, ...txFields } = data;
@@ -378,6 +379,13 @@ export class SyncController {
         }
       }
 
+      // One chain ID per Solana cluster: older Pulsar versions send the Wallet Standard moniker (`solana:devnet`), the
+      // record and its webhooks carry the CAIP-2 ID (`solana:EtWT…`)
+      const chainId =
+        sanitized.adapter === OrbitAdapter.SOLANA
+          ? solanaCaip2ChainId(sanitized.chainId.toString())
+          : sanitized.chainId.toString();
+
       const amlEnabled = meta.appKind === 'payments' && meta.paymentSettings?.amlEnabled === true;
       const initialAmlStatus = amlEnabled ? 'pending' : 'not_applicable';
 
@@ -386,7 +394,7 @@ export class SyncController {
           appId: meta.id ?? null,
           ownerId: meta.ownerId,
           txKey: sanitized.txKey,
-          chainId: sanitized.chainId.toString(),
+          chainId,
           from: sanitized.from,
           type: sanitized.type,
           connectorType: sanitized.connectorType,
@@ -476,7 +484,7 @@ export class SyncController {
       // Increment transaction counter
       this.txCounter.inc({
         ecosystem,
-        chainId: sanitized.chainId.toString(),
+        chainId,
         status: 'Pending',
       });
 
@@ -499,7 +507,7 @@ export class SyncController {
             appId: meta.id,
             ownerId: meta.ownerId,
             fromAddress: sanitized.from,
-            chainId: sanitized.chainId.toString(),
+            chainId,
             txKey: data.txKey,
             customApiKey: meta.paymentSettings?.goPlusApiKey,
             customApiSecret: meta.paymentSettings?.goPlusApiSecret,

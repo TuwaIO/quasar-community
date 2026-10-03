@@ -5,6 +5,8 @@
 
 import * as Sentry from '@sentry/nextjs';
 
+import { SENTRY_DATA_COLLECTION } from './src/lib/sentry-data-collection';
+
 Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
   enabled: process.env.NODE_ENV === 'production',
@@ -12,6 +14,5 @@ Sentry.init({
 
   // Edge runs on every request — keep sampling minimal for free plan
   tracesSampleRate: 0.02,
-  enableLogs: true,
-  sendDefaultPii: false,
+  dataCollection: SENTRY_DATA_COLLECTION,
 });

@@ -519,26 +519,63 @@ rollout_service "quasar-nest-api" "3001" "/v1/engine/monitoring/health"
 rollout_worker  "quasar-worker"
 rollout_service "quasar-app"      "3000" "/api/health"
 
+# Checks every running container of a service against the signed reference,
+# by the reference Compose started it from and by the image it actually runs,
+# and prints one QUASAR_RUNTIME_EVIDENCE line per container. The
+# release-evidence job of deploy.yml reads those lines from this job's log and
+# archives them with the signatures, SBOMs and provenance of the release.
 verify_running_image_reference() {
   local service=$1
   local expected_reference=$2
+  local expected_image_id
+  local desired
+  local containers
+  local count
   local container
   local configured_reference
+  local running_image_id
 
-  for container in $(docker ps "${COMPOSE_PROJECT_FILTER[@]}" --filter "label=com.docker.compose.service=${service}" --format "{{.Names}}"); do
+  expected_image_id=$(docker image inspect --format '{{.Id}}' "$expected_reference")
+  desired=$(${COMPOSE_CMD} config --format json | jq -r ".services.\"${service}\".deploy.replicas // 1")
+  containers=$(docker ps "${COMPOSE_PROJECT_FILTER[@]}" --filter "label=com.docker.compose.service=${service}" --format "{{.Names}}")
+  count=$(echo -n "$containers" | grep -c . || true)
+
+  # Zero containers would otherwise pass the loop below without a single check.
+  if [ "$count" -eq 0 ]; then
+    echo "ERROR: ${service} has no running container to verify."
+    exit 1
+  fi
+  if [ "$count" -ne "$desired" ]; then
+    echo "WARNING: ${service} runs ${count} container(s), the Compose config asks for ${desired}."
+  fi
+
+  for container in $containers; do
     configured_reference=$(docker inspect --format '{{.Config.Image}}' "$container")
     if [ "$configured_reference" != "$expected_reference" ]; then
       echo "ERROR: ${service} container ${container} uses ${configured_reference}, expected ${expected_reference}."
       exit 1
     fi
+    running_image_id=$(docker inspect --format '{{.Image}}' "$container")
+    if [ "$running_image_id" != "$expected_image_id" ]; then
+      echo "ERROR: ${service} container ${container} runs image ${running_image_id}, but ${expected_reference} is ${expected_image_id}."
+      exit 1
+    fi
+    echo "QUASAR_RUNTIME_EVIDENCE $(jq -cn \
+      --arg service "$service" \
+      --arg container "$container" \
+      --arg reference "$configured_reference" \
+      --arg image_id "$running_image_id" \
+      '{service: $service, container: $container, reference: $reference, image_id: $image_id}')"
   done
 }
 
-if [ "$ENV_SUFFIX" = "prod" ]; then
+# Production always deploys digest references (require_digest_reference above). CI passes them to staging too, so
+# the same check runs there first; only a manual staging deploy by tag skips it.
+if [ "$ENV_SUFFIX" = "prod" ] || { [ -n "$QUASAR_APP_IMAGE" ] && [ -n "$QUASAR_NEST_IMAGE" ]; }; then
   verify_running_image_reference "quasar-app" "$QUASAR_APP_IMAGE"
   verify_running_image_reference "quasar-nest-api" "$QUASAR_NEST_IMAGE"
   verify_running_image_reference "quasar-worker" "$QUASAR_NEST_IMAGE"
-  echo "Verified all running production application containers use the approved digest references."
+  echo "Verified all running ${ENV_SUFFIX} application containers use the approved digest references."
 fi
 cleanup_redis
 

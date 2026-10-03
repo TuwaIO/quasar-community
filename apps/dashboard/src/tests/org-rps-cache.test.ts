@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Organizations } from '@/collections/ContextOrganizations/Organizations';
 
-// IronDomeGuard caches the organization's RPS limit inside each app's
+// EngineGuard caches the organization's RPS limit inside each app's
 // `{…}:meta` entry, so an organization whose limit changes has to drop those
 // entries — or the engine keeps enforcing the old limit for up to 5 minutes.
 const redisMocks = vi.hoisted(() => ({

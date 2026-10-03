@@ -26,7 +26,7 @@ apps/server/
 │   ├── main.ts                        # Fastify bootstrap & global guards
 │   ├── app.module.ts                  # Root dependency injection module
 │   ├── common/
-│   │   ├── iron-dome.guard.ts         # API key validation (SHA-256) & rate limiting
+│   │   ├── engine.guard.ts            # API key validation (SHA-256) & rate limiting
 │   │   └── internal.guard.ts          # System guard (x-internal-secret)
 │   ├── database/
 │   │   ├── database.module.ts         # Drizzle connection to PgBouncer
@@ -71,9 +71,9 @@ apps/server/
 
 ---
 
-## 3. The Iron Dome Guard Protocol
+## 3. The Engine Guard
 
-Incoming engine requests to `/v1/engine/sync` are gated by `IronDomeGuard`:
+Incoming engine requests to `/v1/engine/sync` are gated by `EngineGuard`:
 
 - **API Key Verification**: Validates the `x-api-key` header (`pk_live_*` or `sk_live_*`). Secret keys are resolved using SHA-256 cryptographic hashes cached in Redis (`{secretKeyHash}:meta`).
 - **RPS Limiting**: Enforces token-bucket rate limits per application using Redis atomic primitives.

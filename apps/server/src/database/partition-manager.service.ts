@@ -33,11 +33,14 @@ export class PartitionManagerService implements OnModuleInit {
       await (this.redlock as any).using([LOCK_KEY], 30000, async () => {
         this.logger.log('[PartitionManager] Checking and creating future partitions...');
 
+        // Calendar months in UTC, the time zone PostgreSQL reads the date bounds in. With local months a process east
+        // of UTC wrote every bound a day early, and after a time zone change a new partition overlapped the last one
+        // and was not created.
         const now = new Date();
         const targetDates = [
-          new Date(now.getFullYear(), now.getMonth(), 1), // Current month
-          new Date(now.getFullYear(), now.getMonth() + 1, 1), // Next month
-          new Date(now.getFullYear(), now.getMonth() + 2, 1), // Month after next
+          new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)), // Current month
+          new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)), // Next month
+          new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 2, 1)), // Month after next
         ];
 
         for (const table of this.ALLOWED_TABLES) {
@@ -62,11 +65,11 @@ export class PartitionManagerService implements OnModuleInit {
       throw new Error(`Table ${table} is not allowed for partitioning`);
     }
 
-    const year = startDate.getFullYear();
-    const month = (startDate.getMonth() + 1).toString().padStart(2, '0');
+    const year = startDate.getUTCFullYear();
+    const month = (startDate.getUTCMonth() + 1).toString().padStart(2, '0');
     const partitionName = `${table}_y${year}_m${month}`;
 
-    const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 1);
+    const endDate = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth() + 1, 1));
 
     const startStr = startDate.toISOString().split('T')[0];
     const endStr = endDate.toISOString().split('T')[0];

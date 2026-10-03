@@ -1,9 +1,11 @@
+import { DEFAULT_RPS_LIMIT, INITIAL_QUOTA_BALANCE } from '@tuwaio/shared/billing';
 import { NextResponse } from 'next/server';
 import { PayloadRequest } from 'payload';
 import { z } from 'zod';
 
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest } from '@/lib/auth-utils';
+import { parsePagination } from '@/lib/pagination';
 import { OrganizationMember } from '@/payload-types';
 
 const CreateOrgSchema = z.object({
@@ -38,9 +40,9 @@ export const POST = withRateLimit(async (req: Request) => {
       data: {
         name: name.trim(),
         createdBy: user.id,
-        quotaBalance: 100,
-        rpsLimit: 5,
-        rpsPaidLimit: 5,
+        quotaBalance: INITIAL_QUOTA_BALANCE,
+        rpsLimit: DEFAULT_RPS_LIMIT,
+        rpsPaidLimit: DEFAULT_RPS_LIMIT,
         quotaUsed: 0,
       },
       req: req as unknown as PayloadRequest,
@@ -65,8 +67,7 @@ export const GET = withRateLimit(async (req: Request) => {
     const { payload, user } = auth;
 
     const { searchParams } = new URL(req.url);
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '10');
+    const { page, limit } = parsePagination(searchParams);
 
     // 1. Find all memberships for this user (to get the list of org IDs)
     // We fetch all memberships to allow sorting organizations by their own fields (like createdAt)

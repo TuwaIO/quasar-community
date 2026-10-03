@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccess } from '@/lib/auth-utils';
+import { parsePagination } from '@/lib/pagination';
 
 export const runtime = 'nodejs';
 
@@ -19,8 +20,7 @@ export const GET = withRateLimit(async (req: Request, { params }: { params: Prom
     if (access instanceof NextResponse) return access;
 
     const { searchParams } = new URL(req.url);
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '10');
+    const { page, limit } = parsePagination(searchParams);
     const status = searchParams.get('status');
     const chainId = searchParams.get('chainId');
     const type = searchParams.get('type');

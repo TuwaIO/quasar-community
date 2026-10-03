@@ -54,7 +54,7 @@ async function bootstrap() {
     { rawBody: true },
   );
 
-  // Enable CORS for all environments — Engine API is public, protected by IronDomeGuard (API Key + IP Whitelist)
+  // Enable CORS for all environments — Engine API is public, protected by EngineGuard (API Key + IP Whitelist)
   const allowedHeaders = ['Content-Type', 'Accept', 'Authorization', 'Cache-Control', ...Object.values(TUWA_HEADERS)];
   app.enableCors({
     origin: (_origin, callback) => callback(null, true),

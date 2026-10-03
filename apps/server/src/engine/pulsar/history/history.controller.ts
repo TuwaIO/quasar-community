@@ -1,9 +1,20 @@
 import { Controller, Get, Inject, Query, Req } from '@nestjs/common';
-import { and, count, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { getAddress, isAddress } from 'viem';
 
 import { DRIZZLE_READ } from '../../../database/database.constants';
 import * as schema from '../../../database/schema/index';
+import { solanaChainIdAliases } from '../../../lib/solana-chain';
+
+/**
+ * Every form a wallet address may be stored in. Clients sync an EVM sender checksummed or in lower case, so both are
+ * matched (through the `from` index, unlike `lower(from)`); a Solana address is case-sensitive and matched as it is.
+ */
+function walletAddressForms(address: string): string[] {
+  if (!isAddress(address, { strict: false })) return [address];
+  return [...new Set([address, address.toLowerCase(), getAddress(address)])];
+}
 
 @Controller('v1/engine/pulsar/history')
 export class HistoryController {
@@ -11,10 +22,10 @@ export class HistoryController {
 
   @Get()
   async getHistory(@Query() query: Record<string, string>, @Req() req: Record<string, unknown>) {
-    const meta = req.ironDomeMeta as { ownerId: string; id: string };
+    const meta = req.engineMeta as { ownerId: string; id: string };
     const { page = '1', limit = '10', status, txKey, walletAddress, chainId, appName } = query;
 
-    const pageNum = Math.max(1, Number(page));
+    const pageNum = Math.max(1, Math.floor(Number(page)) || 1);
     const limitNum = Math.max(1, Math.min(100, Number(limit) || 10));
     const offset = (pageNum - 1) * limitNum;
 
@@ -25,8 +36,9 @@ export class HistoryController {
       ...(status
         ? [eq(schema.transactions.status, status as (typeof schema.enumTransactionsStatus.enumValues)[number])]
         : []),
-      ...(walletAddress ? [eq(schema.transactions.from, walletAddress)] : []),
-      ...(chainId ? [eq(schema.transactions.chainId, chainId)] : []),
+      ...(walletAddress ? [inArray(schema.transactions.from, walletAddressForms(walletAddress))] : []),
+      // A Solana cluster is stored under its moniker or its CAIP-2 chain ID
+      ...(chainId ? [inArray(schema.transactions.chainId, solanaChainIdAliases(chainId))] : []),
       ...(appName ? [eq(schema.transactions.appName, appName)] : []),
     );
 

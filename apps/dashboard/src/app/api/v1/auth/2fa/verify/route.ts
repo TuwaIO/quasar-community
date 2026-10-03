@@ -80,7 +80,7 @@ export const POST = withRateLimit(async (req: Request) => {
     await createPayloadSession(user, sessionId);
 
     // 5. Finalize Login Cookie
-    const token = generateSignToken(user, sessionId);
+    const token = await generateSignToken(user, sessionId);
     cookieStore.set('payload-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',

@@ -115,6 +115,19 @@ describe('processSolanaTx RPC selection', () => {
       );
     });
 
+    it('accepts the CAIP-2 chain ID of devnet (genesis hash)', async () => {
+      expect(await trackedRpcUrl(undefined, [], { chainId: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1' })).toBe(
+        DEVNET_PUBLIC,
+      );
+    });
+
+    it('finds the Alchemy network of a CAIP-2 mainnet chain ID', async () => {
+      vi.stubEnv('ALCHEMY_API_KEY_FALLBACK', 'system-key');
+      expect(await trackedRpcUrl(undefined, [], { chainId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' })).toBe(
+        'https://solana-mainnet.g.alchemy.com/v2/system-key',
+      );
+    });
+
     it('no longer rescues a cluster without any other RPC', async () => {
       const tx: any = {
         txKey: '5VERsig',

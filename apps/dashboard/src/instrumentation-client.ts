@@ -4,6 +4,8 @@
 
 import * as Sentry from '@sentry/nextjs';
 
+import { SENTRY_DATA_COLLECTION } from '@/lib/sentry-data-collection';
+
 Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
   enabled: process.env.NODE_ENV === 'production',
@@ -21,14 +23,13 @@ Sentry.init({
 
   // Free plan: conservative sampling (5%)
   tracesSampleRate: 0.05,
-  enableLogs: true,
 
   // Session Replay: only capture on errors to conserve free plan quota (50 replays/month)
   replaysSessionSampleRate: 0,
   replaysOnErrorSampleRate: 1.0,
 
   // Selective PII: don't auto-collect, attach manually via Sentry.setUser()
-  sendDefaultPii: false,
+  dataCollection: SENTRY_DATA_COLLECTION,
 
   // Filter noisy/irrelevant errors
   ignoreErrors: [

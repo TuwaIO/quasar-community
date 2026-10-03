@@ -26,7 +26,7 @@ groups:
           severity: critical
         annotations:
           summary: 'Redis API memory high on {{ $labels.instance }}'
-          description: 'API Redis memory usage is above 85% on {{ $labels.instance }} for more than 5 minutes. Critical risk for BullMQ/IronDome state!'
+          description: 'API Redis memory usage is above 85% on {{ $labels.instance }} for more than 5 minutes. Critical risk for BullMQ/EngineGuard state!'
 
       - alert: RedisUIMemoryHigh
         expr: redis_memory_used_bytes{job="redis-ui"} / redis_memory_max_bytes{job="redis-ui"} > 0.90
@@ -56,7 +56,7 @@ groups:
           description: 'Transaction tracking lag is above 60s for {{ $labels.ecosystem }} (Chain: {{ $labels.chainId }}). Pulsar is falling behind the blockchain.'
 
       - alert: QuotaExhausted_HighRate
-        expr: sum(rate(iron_dome_blocks_total{code="402"}[5m])) > 10
+        expr: sum(rate(engine_guard_blocks_total{code="402"}[5m])) > 10
         for: 5m
         labels:
           severity: warning

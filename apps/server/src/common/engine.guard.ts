@@ -19,7 +19,7 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Redis } from 'ioredis';
 import { Counter } from 'prom-client';
 
-import { IRON_DOME_BLOCK_METRIC } from '../constants';
+import { ENGINE_GUARD_BLOCK_METRIC } from '../constants';
 import { DRIZZLE_READ } from '../database/database.module';
 import * as schema from '../database/schema/index';
 import { REDIS } from '../redis/redis.module';
@@ -67,8 +67,8 @@ export interface AppFull {
 }
 
 @Injectable()
-export class IronDomeGuard implements CanActivate {
-  private readonly logger = new Logger(IronDomeGuard.name);
+export class EngineGuard implements CanActivate {
+  private readonly logger = new Logger(EngineGuard.name);
 
   constructor(
     @Inject(REDIS) private readonly redis: Redis,
@@ -76,7 +76,7 @@ export class IronDomeGuard implements CanActivate {
     private readonly configService: ConfigService,
     private readonly reflector: Reflector,
     private readonly secretRotation: SecretRotationService,
-    @InjectMetric(IRON_DOME_BLOCK_METRIC) private readonly blockCounter: Counter<string>,
+    @InjectMetric(ENGINE_GUARD_BLOCK_METRIC) private readonly blockCounter: Counter<string>,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -87,7 +87,7 @@ export class IronDomeGuard implements CanActivate {
         method: string;
         url: string;
         ip: string;
-        ironDomeMeta?: ProxyMetadata;
+        engineMeta?: ProxyMetadata;
       }
     >();
 
@@ -123,7 +123,7 @@ export class IronDomeGuard implements CanActivate {
     // Bypass only if internal secret is valid AND no API key is provided
     if (isIncomingSecretValid && !apiKey) {
       // Populate metadata to prevent crashes in controllers
-      req.ironDomeMeta = {
+      req.engineMeta = {
         id: 'system',
         ownerId: 'system',
         scopes: [],
@@ -138,7 +138,7 @@ export class IronDomeGuard implements CanActivate {
       // For hybrid routes like test-ping, inject system headers if missing
       req.headers[TUWA_HEADERS.PUBLIC_KEY] = req.headers[TUWA_HEADERS.PUBLIC_KEY] || 'quasar-system-account';
       req.headers[TUWA_HEADERS.REMAINING_QUOTA] = req.headers[TUWA_HEADERS.REMAINING_QUOTA] || '999999';
-      const metadata = JSON.stringify(req.ironDomeMeta);
+      const metadata = JSON.stringify(req.engineMeta);
       req.headers[TUWA_HEADERS.METADATA] = req.headers[TUWA_HEADERS.METADATA] || metadata;
       const metadataSecret = validSecrets[0];
       if (metadataSecret) {
@@ -151,7 +151,7 @@ export class IronDomeGuard implements CanActivate {
     }
 
     if (!apiKey) {
-      this.logger.warn(`[IronDome] Request rejected: missing API key. URL=${req.url}`);
+      this.logger.warn(`[EngineGuard] Request rejected: missing API key. URL=${req.url}`);
       throw new UnauthorizedException('Missing API Key');
     }
 
@@ -159,7 +159,7 @@ export class IronDomeGuard implements CanActivate {
     const app = await this.resolveAppWithCache(apiKey as string);
 
     if (!app) {
-      this.logger.warn(`[IronDome] Invalid API Key: ...${apiKey.toString().slice(-6)}`);
+      this.logger.warn(`[EngineGuard] Invalid API Key: ...${apiKey.toString().slice(-6)}`);
       throw new UnauthorizedException('Invalid API Key');
     }
 
@@ -206,7 +206,7 @@ export class IronDomeGuard implements CanActivate {
       try {
         return JSON.parse(cached);
       } catch (e) {
-        this.logger.error(`[IronDome] Failed to parse cached metadata for ${apiKey}:`, e);
+        this.logger.error(`[EngineGuard] Failed to parse cached metadata for ${apiKey}:`, e);
       }
     }
 
@@ -312,7 +312,7 @@ export class IronDomeGuard implements CanActivate {
     if (app.ipWhitelist.length > 0) {
       const clientIp = req.ip; // Reliable client IP from trusted proxy
       if (!clientIp || !app.ipWhitelist.includes(clientIp)) {
-        this.logger.warn(`[IronDome] IP Rejected: ${clientIp} for App ${app.id}`);
+        this.logger.warn(`[EngineGuard] IP Rejected: ${clientIp} for App ${app.id}`);
         throw new ForbiddenException('IP Address not allowed');
       }
     }
@@ -330,7 +330,7 @@ export class IronDomeGuard implements CanActivate {
       }
 
       if (!domain || !app.domainsWhitelist.includes(domain)) {
-        this.logger.warn(`[IronDome] Domain Rejected: ${domain} for App ${app.id}`);
+        this.logger.warn(`[EngineGuard] Domain Rejected: ${domain} for App ${app.id}`);
         throw new ForbiddenException('Origin Domain not allowed');
       }
     }
@@ -352,13 +352,13 @@ export class IronDomeGuard implements CanActivate {
       rpsCount = await this.redis.incr(rpsKey);
       await this.redis.expire(rpsKey, 2);
     } catch (err) {
-      this.logger.error(`[IronDome] Redis RPS error for Org ${organizationId}:`, err);
+      this.logger.error(`[EngineGuard] Redis RPS error for Org ${organizationId}:`, err);
       // Fail-closed on infrastructure failure
       throw new HttpException('Service Unavailable - Rate Limiter Offline', HttpStatus.SERVICE_UNAVAILABLE);
     }
 
     if (rpsCount > rpsLimit) {
-      this.logger.warn(`[IronDome] Global RPS exceeded for Org ${organizationId}: ${rpsCount}/${rpsLimit}`);
+      this.logger.warn(`[EngineGuard] Global RPS exceeded for Org ${organizationId}: ${rpsCount}/${rpsLimit}`);
       this.blockCounter.inc({ code: '429' });
       throw new HttpException('Too Many Requests', HttpStatus.TOO_MANY_REQUESTS);
     }
@@ -368,7 +368,7 @@ export class IronDomeGuard implements CanActivate {
     try {
       cachedLimitStr = await this.redis.get(limitKey);
     } catch (err) {
-      this.logger.error(`[IronDome] Redis limit read error for Org ${organizationId}:`, err);
+      this.logger.error(`[EngineGuard] Redis limit read error for Org ${organizationId}:`, err);
     }
 
     if (!cachedLimitStr) {
@@ -387,7 +387,7 @@ export class IronDomeGuard implements CanActivate {
       try {
         await this.redis.set(limitKey, cachedLimitStr, 'EX', 604800);
       } catch (err) {
-        this.logger.error(`[IronDome] Redis limit write error for Org ${organizationId}:`, err);
+        this.logger.error(`[EngineGuard] Redis limit write error for Org ${organizationId}:`, err);
       }
     }
 
@@ -451,14 +451,14 @@ export class IronDomeGuard implements CanActivate {
     // Blocking Logic
     if (status === 'blocked') {
       this.logger.warn(
-        `[IronDome] Quota exceeded for Org ${organizationId}: usage=${currentUsage}, limit=${cachedLimit}`,
+        `[EngineGuard] Quota exceeded for Org ${organizationId}: usage=${currentUsage}, limit=${cachedLimit}`,
       );
       this.blockCounter.inc({ code: '402' });
       throw new HttpException('Payment Required', HttpStatus.PAYMENT_REQUIRED);
     }
 
     // 5. Inject Metadata
-    req.ironDomeMeta = {
+    req.engineMeta = {
       id: app.id,
       ownerId: organizationId,
       scopes: [],
@@ -472,7 +472,7 @@ export class IronDomeGuard implements CanActivate {
 
     if (isSync) {
       this.logger.log(
-        `[IronDome] ${method} ${url} → mode=${trackMode}, cost=${txCost}, quota=${remaining}, rps=${rpsCount}/${rpsLimit}, key=...${app.id.slice(-6)}`,
+        `[EngineGuard] ${method} ${url} → mode=${trackMode}, cost=${txCost}, quota=${remaining}, rps=${rpsCount}/${rpsLimit}, key=...${app.id.slice(-6)}`,
       );
     }
 
@@ -483,7 +483,7 @@ export class IronDomeGuard implements CanActivate {
     // Inject system headers for downstream controllers
     req.headers[TUWA_HEADERS.REMAINING_QUOTA] = remaining.toString();
     req.headers[TUWA_HEADERS.PUBLIC_KEY] = app.publicKey || undefined;
-    const metadata = JSON.stringify(req.ironDomeMeta);
+    const metadata = JSON.stringify(req.engineMeta);
     req.headers[TUWA_HEADERS.METADATA] = metadata;
     const metadataSecret = validSecrets[0];
     if (metadataSecret) {
@@ -545,7 +545,7 @@ export class IronDomeGuard implements CanActivate {
         isSync.toString(),
       )) as [string, 'allowed' | 'blocked'];
     } catch (err) {
-      this.logger.error(`[IronDome] Redis atomicQuotaCheck error:`, err);
+      this.logger.error(`[EngineGuard] Redis atomicQuotaCheck error:`, err);
       // Fail-closed to protect quota if Redis goes offline
       throw new HttpException('Service Unavailable - Quota Engine Offline', HttpStatus.SERVICE_UNAVAILABLE);
     }

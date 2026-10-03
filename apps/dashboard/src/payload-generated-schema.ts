@@ -121,6 +121,11 @@ export const users = pgTable(
     }),
     salt: varchar('salt'),
     hash: varchar('hash'),
+    resetPasswordRequestedAt: timestamp('reset_password_requested_at', {
+      mode: 'string',
+      withTimezone: true,
+      precision: 3,
+    }),
     loginAttempts: numeric('login_attempts', { mode: 'number' }).default(0),
     lockUntil: timestamp('lock_until', { mode: 'string', withTimezone: true, precision: 3 }),
   },

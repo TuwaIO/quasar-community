@@ -1,6 +1,6 @@
 # Quasar Dashboard — Community Edition (`@tuwaio/quasar`)
 
-> **Payload CMS 3.88 Administrative Interface**  
+> **Payload CMS 3.90 Administrative Interface**  
 > Provides the administrative back-office mounted at `/admin` for self-hosted Quasar nodes, handling API key provisioning, webhook endpoint management, and database schema migrations.
 
 Copyright (c) 2025 - 2026 TUWA.  
@@ -57,7 +57,7 @@ apps/dashboard/
 | Component | Technology | Version | Purpose |
 | :--- | :--- | :--- | :--- |
 | **Framework** | Next.js | 16.3.x | App Router, Standalone container build |
-| **CMS / Schema** | Payload CMS | 3.88.x | PostgreSQL adapter (`@payloadcms/db-postgres`) |
+| **CMS / Schema** | Payload CMS | 3.90.x | PostgreSQL adapter (`@payloadcms/db-postgres`) |
 | **Styling** | Tailwind CSS / Radix UI | 4.x / 1.x | Headless UI primitives for custom admin fields |
 | **Authentication** | Native Payload Auth + TOTP 2FA | — | Self-hosted email/password + RFC 6238 TOTP (zero SIWX / CAIP-122, zero passkeys) |
 | **Database Driver** | Node-Postgres (`pg`) | 8.x | Connection pooling via PgBouncer |

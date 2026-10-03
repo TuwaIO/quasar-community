@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccess } from '@/lib/auth-utils';
+import { parsePagination } from '@/lib/pagination';
 import type { OrganizationMember, User } from '@/payload-types';
 
 const AddMemberSchema = z.object({
@@ -24,8 +25,7 @@ export const GET = withRateLimit(async (req: Request, { params }: { params: Prom
     if (access instanceof NextResponse) return access;
 
     const { searchParams } = new URL(req.url);
-    const limit = parseInt(searchParams.get('limit') || '10') || 10;
-    const page = parseInt(searchParams.get('page') || '1') || 1;
+    const { page, limit } = parsePagination(searchParams);
 
     // Fetch all members with overrideAccess
     const members = await payload.find({

@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
+import { ENGINE_URL } from '@/constants';
 import { getInternalSecret, validateInternalSecret } from '@/lib/redis';
 
 // Ensure the proxy handles API routes for protection, but ignores static assets and Next.js internals
@@ -30,6 +31,14 @@ function isBackendNetworkAddress(value: string | null): boolean {
  * Global Request Proxy (Next.js Middleware)
  * Protects the /dashboard routes and redirects authenticated users from the root.
  */
+// The engine the pages call (test ping, preflight). `https:` already covers a deployed one; a local engine is plain
+// http on whatever port NEXT_PUBLIC_ENGINE_URL names, besides the default 3001
+const ENGINE_CONNECT_SOURCES = [
+  ...new Set(['http://localhost:3001', 'http://127.0.0.1:3001', URL.parse(ENGINE_URL)?.origin ?? '']),
+]
+  .filter(Boolean)
+  .join(' ');
+
 export async function proxy(request: NextRequest) {
   const payloadToken = request.cookies.get('payload-token');
   const path = request.nextUrl.pathname;
@@ -189,7 +198,7 @@ export async function proxy(request: NextRequest) {
   const cspDirectives = [
     "default-src 'self';",
     `script-src 'self' 'unsafe-inline'${allowUnsafeEval ? " 'unsafe-eval'" : ''} https://static.cloudflareinsights.com https://cdn.jsdelivr.net blob:;`,
-    "connect-src 'self' https: wss: blob: https://*.sentry.io https://cloudflareinsights.com https://*.cloudflareinsights.com http://localhost:3001 http://127.0.0.1:3001 https://cdn.jsdelivr.net;",
+    `connect-src 'self' https: wss: blob: https://*.sentry.io https://cloudflareinsights.com https://*.cloudflareinsights.com ${ENGINE_CONNECT_SOURCES} https://cdn.jsdelivr.net;`,
     "img-src 'self' data: blob: https:;",
     "style-src 'self' 'unsafe-inline' https: https://cdn.jsdelivr.net;",
     "font-src 'self' data: https:;",

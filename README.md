@@ -7,8 +7,12 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue)](https://www.typescriptlang.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue)](https://www.postgresql.org/)
 [![NestJS](https://img.shields.io/badge/NestJS-12-red)](https://nestjs.com/)
-[![Payload CMS](https://img.shields.io/badge/Payload_CMS-3.88-black)](https://payloadcms.com/)
+[![Payload CMS](https://img.shields.io/badge/Payload_CMS-3.90-black)](https://payloadcms.com/)
 [![Live Showcase](https://img.shields.io/badge/Live_Showcase-community--stg.tuwa.io-emerald)](https://community-stg.tuwa.io)
+
+<p align="center">
+  <img src="https://cdn.jsdelivr.net/gh/TuwaIO/workflows@main/preview/repos/quasar_community.png" alt="Quasar Community Edition" width="450" style="border-radius: 12px; margin: 24px auto;" />
+</p>
 
 ---
 
@@ -72,7 +76,7 @@ of the edition rather than an uptime-backed service.
 | Layer | Technology | Version | Purpose |
 | :--- | :--- | :--- | :--- |
 | **Workspace / Tooling** | TypeScript / pnpm | 6.0.x / 12.3.x | Monorepo package management and strict type safety |
-| **Admin Management** | Payload CMS 3.88 / Next.js 16 | 3.88.x / 16.3.x | PostgreSQL schema authority, migrations, and `/admin` panel |
+| **Admin Management** | Payload CMS 3.90 / Next.js 16 | 3.90.x / 16.3.x | PostgreSQL schema authority, migrations, and `/admin` panel |
 | **High-Throughput Engine** | NestJS (Fastify) | 12.x | Hot-path transaction ingestion (`POST /v1/engine/sync`) |
 | **Database & Pooling** | PostgreSQL 16 + PgBouncer | 16 / 1.23+ | Primary transactional storage with monthly partitions |
 | **Caching & Queues** | Redis 7 + BullMQ | 7.x / 6.x | Task processing queues (`tracking-fast`, `tracking-lazy`, `webhooks`) |
@@ -87,7 +91,7 @@ of the edition rather than an uptime-backed service.
 ```
 quasar-community/
 ├── apps/
-│   ├── dashboard/          # Payload CMS 3.88 administrative dashboard (/admin)
+│   ├── dashboard/          # Payload CMS 3.90 administrative dashboard (/admin)
 │   │   ├── src/            # Collections, database schema, migrations
 │   │   ├── README.md       # Dashboard documentation
 │   │   └── package.json
@@ -264,13 +268,27 @@ Commit the regenerated file, then rebuild the engine. The map is compiled
 into the engine, and the file is overwritten by every regeneration, so do not
 edit it by hand.
 
+### Solana chain IDs
+
+Transactions and webhook payloads name a Solana cluster by its CAIP-2 chain
+ID, the first 32 characters of the cluster's genesis hash:
+`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` (mainnet),
+`solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` (devnet) and
+`solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z` (testnet). The engine stores this
+form whatever the client sent: Pulsar before 0.9 sends the Wallet Standard
+name (`solana:devnet`). Earlier releases stored that name, and the
+`20261003_071000_solana_caip2_chain_ids` migration rewrites the stored rows.
+The history API and the RPC overrides accept both forms. If a webhook consumer
+compares `chainId` with `solana:mainnet` or `solana:devnet`, update it before
+you upgrade.
+
 ### Workspace limits
 
 A Community node is single-tenant, and there is no billing in it to sell quota
 or throughput. The limits are therefore set effectively unlimited and pinned:
 `quotaBalance` 100,000,000, `rpsLimit` / `rpsPaidLimit` 100,000, and
 `rpsForever` enabled so the limit never expires. They survive as rate-limiting
-and anti-abuse guard rails for `IronDomeGuard`, nothing more. The numbers live
+and anti-abuse guard rails for `EngineGuard`, nothing more. The numbers live
 in one place — `apps/dashboard/src/constants/community.ts` — and apply both to
 the workspace the seed creates and to any organization you create later.
 

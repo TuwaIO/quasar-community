@@ -79,6 +79,9 @@ export async function processGelatoTx(
         } else if (response.status === GelatoStatusCode.Reverted) {
           errorMessage = response.message || 'Transaction reverted on-chain.';
           hash = response.receipt.transactionHash;
+        } else {
+          // gelatoFetcher gives up on a task still pending an hour after it was created
+          errorMessage = 'Gelato task was not executed within an hour.';
         }
       }
       const errString = errorMessage.toLowerCase();

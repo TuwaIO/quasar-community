@@ -144,7 +144,7 @@ export const Organizations: CollectionConfig = {
           ).catch((err) => console.error('[Organizations] Redis sync failed:', (err as Error).message));
         }
 
-        // --- RPS limit: IronDome caches it per app, not per organization ---
+        // --- RPS limit: EngineGuard caches it per app, not per organization ---
         // Covers an admin edit, the RPS adjust route and the seed raising a
         // workspace to its limits; without it the engine would keep the old
         // limit until each app's `{…}:meta` entry expired.

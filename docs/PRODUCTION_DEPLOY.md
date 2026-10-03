@@ -26,7 +26,7 @@ moving data from a local node to a server provisioned with this guide.
 | Service group | Target | Purpose |
 | :--- | :--- | :--- |
 | PostgreSQL (primary + standby) | 2.5–3.0 GB | Transaction indexing, Payload CMS, repmgr HA |
-| Redis API cluster (6 nodes) | 1.5 GB | BullMQ queues, tracking dedup, IronDome quotas |
+| Redis API cluster (6 nodes) | 1.5 GB | BullMQ queues, tracking dedup, EngineGuard quotas |
 | Redis UI cluster (2 nodes) | 512 MB | Dashboard sessions, rate limits, 2FA state |
 | App services (Next.js + NestJS + workers) | ~4.5 GB | 2× Next.js, 2× NestJS, 2× worker replicas |
 | Observability | ~2.5 GB | Prometheus, Grafana, Loki, Promtail, exporters |
@@ -90,18 +90,22 @@ sh get-docker.sh
 docker --version && docker compose version
 ```
 
-Node.js and pnpm are only needed on the server if you plan to run
-`scripts/rotate-encryption-keys.ts` directly on the host (see
-[runbooks/operations.md](./runbooks/operations.md)); everything else — build,
-migrate, seed — runs inside containers. Skip this if you don't need key
-rotation from the host:
+Node.js and pnpm are not needed on the server: build, migrate, seed and the
+rotation of `ENCRYPTION_KEY` all run inside containers. The rotation script
+ships in the engine image and re-encrypts every stored secret; run it in the
+engine container, where `DATABASE_URL` is already set:
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
-sudo apt install -y nodejs
-curl -fsSL https://get.pnpm.io/install.sh | sh -
-source ~/.bashrc
+docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.prod.yml \
+  exec -e OLD_ENCRYPTION_KEY=<old 64-char hex> -e NEW_ENCRYPTION_KEY=<new 64-char hex> \
+  quasar-nest-api node dist/scripts/rotate-encryption-keys.js
 ```
+
+When it ends with `Rotation Completed`, put the new key into `ENCRYPTION_KEY`
+in `.env` and recreate `quasar-app`, `quasar-nest-api` and `quasar-worker`. If
+it reports `Rotation INCOMPLETE` (exit code 1), keep the old key: the failed
+records are still encrypted with it. A re-run with the same keys skips the
+records already on the new key.
 
 ## 4. Clone the repository
 

@@ -11,6 +11,12 @@ export interface VolumeDiscountTier {
 /** Baseline RPS included in any plan or top-up */
 export const DEFAULT_RPS_LIMIT = 5;
 
+/**
+ * Quota units a new organization starts with. The `quotaBalance` default of the Organizations collection repeats the
+ * literal, because the Community Edition codemod rewrites that literal to the community limit.
+ */
+export const INITIAL_QUOTA_BALANCE = 100;
+
 /** Maximum allowed RPS concurrent limit */
 export const MAX_RPS_LIMIT = 300;
 

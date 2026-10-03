@@ -3,13 +3,14 @@ import { initializePollingTracker, SolanaTransaction, TransactionStatus } from '
 import { solanaFetcher } from '@tuwaio/pulsar-solana';
 import { UpdatableTransactionFields } from '@tuwaio/quasar-sdk';
 import { decrypt } from '@tuwaio/shared/encryption';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Counter, Gauge } from 'prom-client';
 
 import { getAlchemyKey } from '../../constants';
 import * as schema from '../../database/schema/index';
 import { alchemyNetworkMap } from '../../lib/generated/alchemyNetworkMap';
+import { solanaChainIdAliases, solanaClusterOf } from '../../lib/solana-chain';
 import { isUsableRpcUrl } from './rpc-guard';
 
 type UpdateFn = (txKey: string, data: UpdatableTransactionFields, isTerminal?: boolean) => Promise<void>;
@@ -25,6 +26,9 @@ export async function processSolanaTx(
 ) {
   const appId = tx.appId;
   const chainId = tx.chainId as string;
+  // The moniker (`solana:devnet`) and the CAIP-2 ID (`solana:EtWT…`) name the same cluster
+  const chainIdAliases = solanaChainIdAliases(chainId);
+  const cluster = solanaClusterOf(chainId);
 
   if (!appId) {
     throw new Error(`[SOLANA TRACKER] Missing appId for tx ${tx.txKey}. BYO-RPC requires appId.`);
@@ -41,7 +45,7 @@ export async function processSolanaTx(
   const appConfigs = await db
     .select({ rpcUrl: schema.appsRpcConfigs.rpcUrl })
     .from(schema.appsRpcConfigs)
-    .where(and(eq(schema.appsRpcConfigs.parentId, appId), eq(schema.appsRpcConfigs.chainId, chainId)));
+    .where(and(eq(schema.appsRpcConfigs.parentId, appId), inArray(schema.appsRpcConfigs.chainId, chainIdAliases)));
 
   for (const c of appConfigs) {
     const url = decrypt(c.rpcUrl);
@@ -52,7 +56,7 @@ export async function processSolanaTx(
   }
 
   // B. App-specific Alchemy
-  const alchemyNetwork = alchemyNetworkMap[chainId];
+  const alchemyNetwork = alchemyNetworkMap[chainIdAliases[0]];
   if (app?.alchemyApiKey && alchemyNetwork) {
     const decryptedAlchemyKey = decrypt(app.alchemyApiKey);
     rpcUrls.push(`https://${alchemyNetwork}.g.alchemy.com/v2/${decryptedAlchemyKey}`);
@@ -82,10 +86,10 @@ export async function processSolanaTx(
   }
 
   // E. Public Fallback
-  if (chainId === 'solana:mainnet') {
+  if (cluster === 'mainnet') {
     rpcUrls.push('https://api.mainnet-beta.solana.com');
     sources.push('Public Fallback');
-  } else if (chainId === 'solana:devnet') {
+  } else if (cluster === 'devnet') {
     rpcUrls.push('https://api.devnet.solana.com');
     sources.push('Public Fallback');
   }

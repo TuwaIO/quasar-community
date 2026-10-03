@@ -28,7 +28,7 @@ export const PULSAR_TX_COUNT_METRIC = 'pulsar_tx_total';
 export const PULSAR_TX_ERROR_METRIC = 'pulsar_tx_errors_total';
 export const PULSAR_ACTIVE_TRACKERS_METRIC = 'pulsar_active_trackers';
 
-export const IRON_DOME_BLOCK_METRIC = 'iron_dome_blocks_total';
+export const ENGINE_GUARD_BLOCK_METRIC = 'engine_guard_blocks_total';
 export const WEBHOOK_DELIVERY_METRIC = 'webhook_delivery_total';
 export const WEBHOOK_LATENCY_METRIC = 'webhook_delivery_latency_seconds';
 export const QUEUE_HEALTH_METRIC = 'queue_jobs_count';

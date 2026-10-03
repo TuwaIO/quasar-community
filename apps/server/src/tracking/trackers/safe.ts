@@ -63,7 +63,12 @@ export async function processSafeTx(
       console.debug(`[SAFE TRACKER] Tick for ${tx.txKey}: hash=${response.transactionHash}`);
     },
     onFailure: async (response) => {
-      const errorMessage = response ? 'Safe transaction failed or was rejected.' : 'Transaction not found.';
+      // safeFetcher fails without a response on a 404, and with a pending one a day after the proposal
+      const errorMessage = !response
+        ? 'Safe transaction not found, or tracking failed.'
+        : response.isExecuted
+          ? 'Safe transaction failed or was rejected.'
+          : 'Safe transaction was not executed within a day.';
 
       const errString = errorMessage.toLowerCase();
       if (errString.includes('429') || errString.includes('too many requests')) {

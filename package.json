@@ -1,13 +1,13 @@
 {
   "name": "quasar-community",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "author": "Oleksandr Tkach <support@tuwa.io> (https://tuwa.io)",
   "license": "Apache-2.0",
   "private": false,
   "publishConfig": {
     "access": "public"
   },
-  "packageManager": "pnpm@12.3.4",
+  "packageManager": "pnpm@12.8.1",
   "description": "Quasar Community Edition — Self-hosted headless Web3 transaction indexing and tracking engine.",
   "type": "module",
   "scripts": {
@@ -29,21 +29,21 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^26.5.0",
+    "@types/node": "^26.6.4",
     "cross-env": "^10.1.0",
     "dotenv-cli": "^11.0.0",
-    "eslint": "^10.10.0",
+    "eslint": "^10.12.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.6",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.6",
+    "eslint-plugin-react-refresh": "^0.5.7",
     "eslint-plugin-simple-import-sort": "^14.0.0",
-    "globals": "^17.12.0",
-    "prettier": "^3.9.6",
-    "tsx": "^4.23.13",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
     "typescript": "6.0.3",
-    "typescript-eslint": "^8.70.0",
-    "vitest": "^5.0.0"
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
   },
   "homepage": "https://github.com/TuwaIO/quasar-community#readme",
   "repository": {

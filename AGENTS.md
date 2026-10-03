@@ -13,7 +13,7 @@
 
 | Tenet                   | Meaning                                                                                                        |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------- |
-| **The Iron Dome**       | Dual-Layer security. Next.js Middleware for Payload Admin/Auth. NestJS Fastify Guard for high-performance Engine APIs. |
+| **Dual-Layer Security** | Next.js Middleware for Payload Admin/Auth. NestJS Fastify Guard for high-performance Engine APIs.                     |
 | **Single-Admin Scoping**| Self-hosted single-tenant / Personal Workspace model. Queries are scoped by `organizationId`.                   |
 | **Machine-Only Writes** | Transaction data is written exclusively by Pulsar Sync clients via documented API endpoints (`/v1/engine/*`).   |
 | **Self-Sovereignty**    | 100% self-hosted on bare metal or VPS via Docker Compose. No managed cloud services required, zero external SaaS telemetry. |
@@ -23,7 +23,7 @@
 | Layer            | Technology                              | Version |
 | ---------------- | --------------------------------------- | ------- |
 | Framework        | Next.js (App Router)                    | 16.3.x  |
-| CMS / ORM        | Payload CMS                             | 3.88.x  |
+| CMS / ORM        | Payload CMS                             | 3.90.x  |
 | NestJS Server    | NestJS (Fastify)                        | 12.x    |
 | NestJS ORM       | Drizzle ORM                             | 0.45.x  |
 | Database         | PostgreSQL (self-hosted)                | 16      |
@@ -44,13 +44,14 @@
 ### 2.1 Dependency & Schema Integrity
 
 - **FORBIDDEN**: `ethers.js`, `web3.js`, `RainbowKit`, `ConnectKit`, `gill`.
-- **REQUIRED**: `viem`, `wagmi`, `@solana/kit` (Solana), `@tuwaio/orbit-solana`.
+- **REQUIRED**: `viem`, `@wagmi/core`, `@solana/kit` (Solana), `@tuwaio/orbit-solana`.
+- **SOLANA CHAIN IDS**: Transactions, RPC overrides and webhooks name a Solana cluster by its CAIP-2 chain ID with the genesis hash (`solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` is devnet). Pulsar before 0.9 sends the Wallet Standard name (`solana:devnet`), so the Engine stores `solanaCaip2ChainId(chainId)` and matches stored rows with `solanaChainIdAliases(chainId)` (`apps/server/src/lib/solana-chain.ts`, built on `@tuwaio/orbit-core`). Never compare a Solana chain ID as a plain string, and never hard-code a second genesis table.
 - **SCHEMA AUTHORITY**: Payload CMS owns the database schema. **NEVER** use Drizzle (`drizzle-kit push` / `pnpm db:push`) to apply schema changes to staging/production databases. All production schema changes must go through Payload migrations (`pnpm db:migrate`), ensuring partitioned tables metadata remains intact. Create them as described in §2.2.1.
 
 ### 2.2 Database Partitioning (Time-Series)
 
 - **PARTITIONED TABLES**: `transactions`, `webhook_deliveries`.
-- **STRATEGY**: Monthly partitions (e.g., `_y2026_m05`).
+- **STRATEGY**: Monthly partitions (e.g., `_y2026_m05`), calendar months in UTC.
 - **MANAGEMENT**: Automated by `PartitionManagerService` + `PartitionCronService`.
 - **LOCKING**: Distributed Redlock is mandatory for partition creation and usage synchronization.
 
@@ -72,7 +73,7 @@ The Payload config knows nothing about partitions, but the init migration and it
 - **ALWAYS** use `usePulsarStore -> executeTxAction` for all blockchain writes.
 - **STATELESS APPS**: Both Next.js and NestJS are stateless. Scale them horizontally using `replicas` in Docker Compose.
 - **DUAL REDIS ISOLATION**:
-  - **`REDIS_API` (`redisApi`)**: Core engine queues (BullMQ `outbox`, `tracking-fast`, `tracking-lazy`, `webhook-delivery`, `aml-screening`), IronDome key resolution (`{secretKeyHash}:meta`), and Redlock usage sync (`{orgId}:usage`). Uses `noeviction` with AOF persistence.
+  - **`REDIS_API` (`redisApi`)**: Core engine queues (BullMQ `outbox`, `tracking-fast`, `tracking-lazy`, `webhook-delivery`, `aml-screening`), EngineGuard key resolution (`{secretKeyHash}:meta`), and Redlock usage sync (`{orgId}:usage`). Uses `noeviction` with AOF persistence.
   - **`REDIS_UI` (`redis`)**: Admin panel ephemeral state (Rate Limiting, 2FA Locks, Admin Sessions). Uses `allkeys-lru` eviction policy capped at 256MB.
   - **URL RESOLUTION**: Always use `resolveEnvUrl` from `@tuwaio/shared/utils` to parse nested `${VAR}` placeholders in raw Redis connection strings.
 
@@ -93,7 +94,7 @@ The Payload config knows nothing about partitions, but the init migration and it
 
 ---
 
-## 3. The "Iron Dome" Protocol (Dual-Subdomain Architecture)
+## 3. Dual-Layer Security (Dual-Subdomain Architecture)
 
 ### Management Layer (`quasar.${DOMAIN}`)
 - **Scope**: Payload Admin Panel and Admin Auth (`/admin`).
@@ -102,7 +103,7 @@ The Payload config knows nothing about partitions, but the init migration and it
 
 ### Performance Layer (`api.${DOMAIN}`)
 - **Scope**: High-performance Fastify Engine API (`/v1/engine/*`).
-- **IronDomeGuard**: Handles API Key resolution (SHA-256 hashing for Secret Keys), Whitelisting, and RPS limiting.
+- **EngineGuard**: Handles API Key resolution (SHA-256 hashing for Secret Keys), Whitelisting, and RPS limiting.
 - **Smart Degradation**: Zero remaining quota triggers `lazy` trackMode for Pulsar Sync instead of hard blocking.
 
 ---
@@ -126,7 +127,7 @@ apps/
 └── server/                            # NestJS high-performance Fastify server
     ├── src/
     │   ├── common/
-    │   │   ├── iron-dome.guard.ts     # High-perf Engine Security & API Key Resolution
+    │   │   ├── engine.guard.ts        # High-perf Engine Security & API Key Resolution
     │   │   └── internal.guard.ts      # System-only Guard
     │   ├── cron/                      # Centralized Jobs (Usage Sync, Partitions, Pending Sweeper)
     │   ├── database/
@@ -159,7 +160,7 @@ Usage data is synced from Redis to Postgres via `SyncUsageService` using a tempo
 ### Quota Weights
 
 Every weight lives in `QUOTA_DEFAULTS` (`packages/shared/src/constants.ts`) and
-is applied in `IronDomeGuard.processAuthorizedRequest`. Never inline a number at
+is applied in `EngineGuard.processAuthorizedRequest`. Never inline a number at
 a call site.
 
 | What | Constant | Units |
@@ -300,7 +301,7 @@ This project is 100% self-hosted on bare metal/VPS via Docker. Any suggestion to
 2. **Parent Resource IDOR/BOLA Protection**:
    - All nested resources (e.g. `PATCH /api/v1/organizations/[orgId]/members/[memberId]`) strictly validate the parent identifier against the database target representation.
 3. **Unified Cache-Aside Invalidation**:
-   - `IronDomeGuard` caches apps using their SHA-256 secret key hash (`{secretKeyHash}:meta`) and public key (`{publicKey}:meta`).
+   - `EngineGuard` caches apps using their SHA-256 secret key hash (`{secretKeyHash}:meta`) and public key (`{publicKey}:meta`).
    - Any create/update/delete operation in the `Apps` collection or `outbox-processor` background queue instantly invalidates these keys.
 4. **`overrideAccess: true` Verification Checklist**:
    - Any query using `overrideAccess: true` completely bypasses Payload access control rules.

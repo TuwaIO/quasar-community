@@ -5,10 +5,10 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
 import { makeCounterProvider, makeHistogramProvider, PrometheusModule } from '@willsoto/nestjs-prometheus';
 
+import { EngineGuard } from './common/engine.guard';
 import { InternalGuard } from './common/internal.guard';
-import { IronDomeGuard } from './common/iron-dome.guard';
 import { PrometheusInterceptor } from './common/prometheus.interceptor';
-import { IRON_DOME_BLOCK_METRIC } from './constants';
+import { ENGINE_GUARD_BLOCK_METRIC } from './constants';
 import { CronModule } from './cron/cron.module';
 import { DatabaseModule } from './database/database.module';
 import { EngineModule } from './engine/engine.module';
@@ -36,7 +36,7 @@ import { WorkerModule } from './worker/worker.module';
 ],
   controllers: [InternalController],
   providers: [
-    { provide: APP_GUARD, useClass: IronDomeGuard },
+    { provide: APP_GUARD, useClass: EngineGuard },
     { provide: APP_GUARD, useClass: InternalGuard },
     {
       provide: APP_INTERCEPTOR,
@@ -49,8 +49,8 @@ import { WorkerModule } from './worker/worker.module';
       buckets: [0.1, 0.5, 1, 2, 5],
     }),
     makeCounterProvider({
-      name: IRON_DOME_BLOCK_METRIC,
-      help: 'Total number of requests blocked by Iron Dome',
+      name: ENGINE_GUARD_BLOCK_METRIC,
+      help: 'Total number of requests blocked by the engine guard',
       labelNames: ['code'],
     }),
     {

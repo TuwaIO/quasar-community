@@ -65,8 +65,15 @@ jobs:
           OWNER: ${{ steps.repo.outputs.owner }}
           IMAGE_BASE: ${{ steps.repo.outputs.image_base }}
           REPOSITORY: ${{ github.repository }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
         run: |
-          CERTIFICATE_IDENTITY_REGEXP="^https://github.com/${REPOSITORY}/.github/workflows/deploy.yml@refs/heads/(main|staging)$"
+          # Production runs only images that deploy.yml built and signed on main. A staging build is signed by the
+          # same workflow, but from another branch and with the staging environment's build-time variables baked in.
+          if [ "$TARGET_ENVIRONMENT" = "production" ]; then
+            CERTIFICATE_IDENTITY_REGEXP="^https://github.com/${REPOSITORY}/.github/workflows/deploy.yml@refs/heads/main$"
+          else
+            CERTIFICATE_IDENTITY_REGEXP="^https://github.com/${REPOSITORY}/.github/workflows/deploy.yml@refs/heads/(main|staging)$"
+          fi
           for suffix in app nest migrate; do
             component="${IMAGE_BASE}-${suffix}"
             tagged_image="ghcr.io/${OWNER}/${component}:${IMAGE_TAG}"

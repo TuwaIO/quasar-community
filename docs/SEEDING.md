@@ -42,7 +42,7 @@ places, so a workspace gets the same limits whether the seed made it or you did:
 | `rpsLimit` / `rpsPaidLimit` | 100,000 | Global requests-per-second ceiling across every app in the organization. |
 | `rpsForever` | `true` | The RPS limit never expires. The paid-lease expiry cron is not part of this edition, so nothing would ever renew a lease — an expiring limit would have no way back up. |
 
-These are rate-limiting and anti-abuse parameters for `IronDomeGuard`, not a
+These are rate-limiting and anti-abuse parameters for `EngineGuard`, not a
 monetized quota.
 
 **Creating the workspace is not the only path.** Creating the admin user fires a

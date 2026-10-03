@@ -10,7 +10,7 @@
 | **Traefik** | `traefik:v3.6.x` | Reverse proxy, routing |
 | **PostgreSQL Primary/Standby** | `quasar/postgresql-repmgr:16` | HA Database cluster with Repmgr |
 | **PgBouncer** | `edoburu/pgbouncer:latest` | Connection pooling for Postgres |
-| **Redis API Cluster** | `redis:7-alpine` | 6-node Redis cluster (`noeviction`, AOF) for BullMQ & IronDome |
+| **Redis API Cluster** | `redis:7-alpine` | 6-node Redis cluster (`noeviction`, AOF) for BullMQ & EngineGuard |
 | **Redis UI Instance** | `redis:7-alpine` | Ephemeral Redis instance (`allkeys-lru`, 256MB) for RateLimit/2FA |
 | **Quasar App** | Custom (Next.js 16.3 Standalone) | Payload CMS + API Engine |
 | **Quasar NestJS** | Custom (NestJS 12 + Fastify) | High-performance hot-path microservice |
@@ -92,7 +92,7 @@ NEXT_PUBLIC_ENGINE_URL=https://api.example.com
 INTERNAL_ENGINE_URL=http://quasar-nest-api:3001
 ```
 
-Do not use the public Engine URL for server-side requests from the VPS. That creates a hairpin route through the Cloudflare Tunnel and can result in `502 Bad Gateway` even when the Engine, database, and public API are healthy. The internal URL is still authenticated by the Engine's `IronDomeGuard`; the SDK sends the configured secret key in its normal request header.
+Do not use the public Engine URL for server-side requests from the VPS. That creates a hairpin route through the Cloudflare Tunnel and can result in `502 Bad Gateway` even when the Engine, database, and public API are healthy. The internal URL is still authenticated by `EngineGuard`; the SDK sends the configured secret key in its normal request header.
 
 ---
 

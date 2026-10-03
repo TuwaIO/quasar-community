@@ -77,8 +77,19 @@ if ! grep -q 'cosign sign --yes' .github/workflows/deploy.yml \
 fi
 if ! grep -q 'require_digest_reference' scripts/deploy.sh \
   || ! grep -q 'verify_running_image_reference' scripts/deploy.sh \
-  || ! grep -q 'cosign verify' .github/workflows/rollback.yml; then
+  || ! grep -q 'has no running container to verify' scripts/deploy.sh \
+  || ! grep -q 'cosign verify' .github/workflows/rollback.yml \
+  || ! grep -q 'deploy.yml@refs/heads/main\$"' .github/workflows/rollback.yml; then
   echo "FAIL: Deploy or rollback path does not verify signed immutable artifact references." >&2
+  RELEASE_GATES_OK=false
+fi
+# The evidence of each production release is archived as a GitHub release: deploy.sh reports the running digests,
+# the release-evidence job verifies them with the signatures and attestations and publishes the bundle.
+if ! grep -q 'QUASAR_RUNTIME_EVIDENCE' scripts/deploy.sh \
+  || ! grep -q '^  release-evidence:' .github/workflows/deploy.yml \
+  || ! grep -q 'QUASAR_RUNTIME_EVIDENCE' .github/workflows/deploy.yml \
+  || ! grep -q 'gh release create' .github/workflows/deploy.yml; then
+  echo "FAIL: Production releases are not archived with their signature, SBOM, provenance and runtime digest evidence." >&2
   RELEASE_GATES_OK=false
 fi
 if [ "$RELEASE_GATES_OK" = true ]; then

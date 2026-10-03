@@ -1,13 +1,19 @@
-import { withSentryConfig } from '@sentry/nextjs';
+import { withSentryConfig } from '@sentry/nextjs/config';
 import { withPayload } from '@payloadcms/next/withPayload';
-import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+// The workspace .env, for `next dev` and `next build` on a host. Variables already set win, and in containers, which
+// get their environment from Compose, there is no file. Node's own loader: the `dotenv` package (18+) would also
+// install a `dotenv` binary over the `dotenv-cli` one that the package scripts call.
+try {
+  process.loadEnvFile(path.resolve(__dirname, '../../.env'));
+} catch {
+  // No .env file
+}
 
 const NEST_SERVER_URL = process.env.NEST_SERVER_URL || 'http://localhost:3001';
 
@@ -115,11 +121,12 @@ export default withSentryConfig(withPayload(nextConfig, { devBundleServerPackage
   // Route browser requests to Sentry through a Next.js rewrite to circumvent ad-blockers.
   tunnelRoute: "/monitoring",
 
-  // CRITICAL: prevent .map files from being served to clients
-  hideSourceMaps: true,
-
-  // Disable source map upload when no auth token is present (local dev)
-  disableSourceMapUpload: !process.env.SENTRY_AUTH_TOKEN,
+  sourcemaps: {
+    // No auth token (local dev, Community Edition): no browser source maps are generated at all
+    disable: !process.env.SENTRY_AUTH_TOKEN,
+    // CRITICAL: the uploaded .map files are deleted, so they are never served to clients
+    deleteSourcemapsAfterUpload: true,
+  },
 
   // Attach git commit SHA for release tracking
   release: {

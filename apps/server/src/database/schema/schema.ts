@@ -86,6 +86,7 @@ export const users = pgTable("users", {
 	verificationtoken: varchar("_verificationtoken"),
 	loginAttempts: numeric("login_attempts").default('0'),
 	lockUntil: timestamp("lock_until", { precision: 3, withTimezone: true, mode: 'string' }),
+	resetPasswordRequestedAt: timestamp("reset_password_requested_at", { precision: 3, withTimezone: true, mode: 'string' }),
 }, (table) => [
 	index("users_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	uniqueIndex("users_email_idx").using("btree", table.email.asc().nullsLast().op("text_ops")),
@@ -797,6 +798,7 @@ export const media = pgTable("media", {
 	height: numeric(),
 	focalX: numeric("focal_x"),
 	focalY: numeric("focal_y"),
+	objectkey: varchar("_objectkey"),
 }, (table) => [
 	index("media_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	uniqueIndex("media_filename_idx").using("btree", table.filename.asc().nullsLast().op("text_ops")),

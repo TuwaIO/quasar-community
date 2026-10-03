@@ -6,7 +6,7 @@
  * open-source-plans/03-billing-vs-payments.md). So the quota and RPS ceilings
  * exist only as anti-runaway guard rails, and are set effectively unlimited.
  *
- * IronDomeGuard and QuotaUsageLedger keep working normally on top of these
+ * EngineGuard and QuotaUsageLedger keep working normally on top of these
  * numbers — they are rate-limiting and anti-abuse infrastructure, not billing,
  * and a self-hoster still wants them.
  *

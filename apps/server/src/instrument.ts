@@ -1,6 +1,9 @@
 import * as Sentry from '@sentry/nestjs';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
 
+// Matches header and query parameter names that carry the client's IP address or identity
+const IDENTITY_KEYS = ['forwarded', '-ip', 'remote-', 'via', '-user'];
+
 Sentry.init({
   dsn: process.env.SENTRY_NEST_DSN,
   enabled: process.env.NODE_ENV === 'production',
@@ -11,12 +14,24 @@ Sentry.init({
 
   // Free plan: conservative sampling
   tracesSampleRate: 0.05,
-  profilesSampleRate: 0.1,
+  // Profiles 10% of the processes, while a sampled span is running
+  profileSessionSampleRate: 0.1,
+  profileLifecycle: 'trace',
 
-  enableLogs: true,
-
-  // Selective PII: no auto-collection, manual context only
-  sendDefaultPii: false,
+  // Selective PII: no auto-collection, manual context only. Sentry 11 collects everything by default: this is the
+  // `sendDefaultPii: false` baseline of its migration guide, plus no queue job arguments and no local variables
+  dataCollection: {
+    userInfo: false,
+    cookies: false,
+    httpHeaders: { request: { deny: IDENTITY_KEYS }, response: { deny: IDENTITY_KEYS } },
+    httpBodies: [],
+    urlQueryParams: { deny: IDENTITY_KEYS },
+    genAI: { inputs: false, outputs: false },
+    databaseQueryData: false,
+    graphQL: { document: false, variables: false },
+    queues: false,
+    stackFrameVariables: false,
+  },
 
   // Filter expected business-logic exceptions (not bugs)
   ignoreErrors: [

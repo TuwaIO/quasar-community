@@ -13,7 +13,20 @@ export const GET = withRateLimit(async () => {
     const { user } = await payload.auth({ headers: headerStore });
 
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      const response = NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      // A token that no longer authenticates (expired or revoked session, deleted user, rotated secret, a format
+      // the Payload version no longer accepts) is expired here: the proxy only checks that the cookie exists, so
+      // it would keep sending the browser back to /dashboard, and Payload's logout refuses to clear it without a user
+      if (headerStore.get('cookie')?.includes('payload-token=')) {
+        response.cookies.set('payload-token', '', {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+          path: '/',
+          maxAge: 0,
+        });
+      }
+      return response;
     }
 
     return NextResponse.json({

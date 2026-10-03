@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccess } from '@/lib/auth-utils';
+import { parsePagination } from '@/lib/pagination';
 
 export const runtime = 'nodejs';
 
@@ -21,8 +22,7 @@ export const GET = withRateLimit(async (req: Request, { params }: { params: Prom
     const { searchParams } = new URL(req.url);
     const appId = searchParams.get('appId');
     const webhookId = searchParams.get('webhookId');
-    const page = parseInt(searchParams.get('page') || '1', 10);
-    const limit = parseInt(searchParams.get('limit') || '50', 10);
+    const { page, limit } = parsePagination(searchParams, 50);
     const search = searchParams.get('search');
 
     const where: any = {

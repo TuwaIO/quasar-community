@@ -8,6 +8,7 @@ import path from 'path';
 import transactionTemplate from '@/constants/transaction-receipt-template.json';
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccessOrSystemAdmin } from '@/lib/auth-utils';
+import { formatChainId } from '@/lib/formatChainId';
 import { formatTimestamp } from '@/lib/formatTimestamp';
 import type { Transaction } from '@/payload-types';
 
@@ -62,7 +63,7 @@ export const GET = withRateLimit(
       // -------------------------------------------------------------------
       const chainName = (() => {
         try {
-          return getChainName(parseInt(tx.chainId)).name;
+          return getChainName(formatChainId(tx.chainId)).name;
         } catch {
           return tx.chainId;
         }

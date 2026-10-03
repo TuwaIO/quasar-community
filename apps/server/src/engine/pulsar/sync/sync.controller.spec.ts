@@ -53,7 +53,7 @@ describe('SyncController (Payments Logic)', () => {
 
   const createMockContext = (metaOverrides: any = {}) => {
     const req = {
-      ironDomeMeta: {
+      engineMeta: {
         id: 'app_123',
         status: 'active',
         isRevoked: false,
@@ -433,5 +433,38 @@ describe('SyncController (Payments Logic)', () => {
       chainId: '8453',
       status: 'Pending',
     });
+  });
+
+  it.each([
+    ['solana:devnet', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1'],
+    ['solana:mainnet-beta', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'],
+    ['solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1'],
+  ])('stores the Solana chain ID %s sent by a client as the CAIP-2 chain ID %s', async (sentChainId, storedChainId) => {
+    db.select.mockReturnValue({
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([]),
+    });
+    const values = vi.fn().mockResolvedValue({});
+    db.insert.mockReturnValue({ values });
+
+    const { req, res } = createMockContext();
+
+    const body = {
+      adapter: 'solana',
+      txKey: '5VERsig',
+      chainId: sentChainId,
+      connectorType: 'solana:phantom',
+      from: '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV',
+      pending: true,
+      localTimestamp: Date.now(),
+      tracker: 'solana',
+      type: 'transfer',
+    };
+
+    await controller.syncTransaction(body, req as any, res as any);
+
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({ chainId: storedChainId }));
+    expect(txCounter.inc).toHaveBeenCalledWith({ ecosystem: 'Solana', chainId: storedChainId, status: 'Pending' });
   });
 });
