@@ -1,5 +1,7 @@
 // @vitest-environment node
 // Signing runs on the server: under jsdom, jose rejects the Uint8Array of the jsdom realm
+import { randomBytes } from 'node:crypto';
+
 import jwt from 'jsonwebtoken';
 import { JWT_AUTH_VERSION } from 'payload';
 import { describe, expect, it, vi } from 'vitest';
@@ -7,7 +9,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { generateSignToken } from '@/lib/signInLibs';
 import type { User } from '@/payload-types';
 
-const SECRET = 'derived-payload-secret-0123456789';
+// Generated, not a literal: Semgrep p/default (the Community Edition gate) blocks a string
+// literal passed to jwt.verify as hardcoded-jwt-secret.
+const SECRET = randomBytes(32).toString('hex');
 
 vi.mock('@payload-config', () => ({ default: {} }));
 
