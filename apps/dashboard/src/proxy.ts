@@ -13,8 +13,10 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - images/assets with common extensions
+     * - api/v1/admin/cloud-import: with a proxy, Next keeps only the first 10 MB of a request body, and an export
+     *   upload is larger; these routes check the origin themselves (lib/cloud-transfer/import/guard.ts)
      */
-    '/((?!_next/static|_next/image|favicon.ico|monitoring|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|monitoring|api/v1/admin/cloud-import|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
 

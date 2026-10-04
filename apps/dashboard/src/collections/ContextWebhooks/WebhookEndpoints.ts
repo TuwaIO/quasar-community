@@ -264,22 +264,9 @@ export const WebhookEndpoints: CollectionConfig = {
         return data;
       },
     ],
-    beforeDelete: [
-      async ({ id, req }) => {
-        try {
-          // Cascade delete related WebhookDeliveries
-          await req.payload.delete({
-            collection: 'webhook-deliveries',
-            where: {
-              endpoint: { equals: id },
-            },
-            overrideAccess: true,
-            req,
-          });
-        } catch (error) {
-          req.payload.logger.error({ err: error }, `Failed to cascade delete webhook-deliveries for endpoint ${id}`);
-        }
-      },
-    ],
+    // No beforeDelete: the foreign key of `webhook_deliveries.endpoint_id`
+    // cascades (migration 20261003_212609_webhook_deliveries_cascade), so the
+    // endpoint's DELETE removes its deliveries in the same statement, including
+    // one the engine records while the endpoint is being deleted.
   },
 };

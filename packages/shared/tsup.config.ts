@@ -10,6 +10,7 @@ export default defineConfig({
     'src/fixtures/index.ts',
     'src/crash-injection.ts',
     'src/ssrf.ts',
+    'src/partitions.ts',
   ],
   format: ['esm', 'cjs'],
   dts: true,

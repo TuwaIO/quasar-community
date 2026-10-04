@@ -45,6 +45,7 @@
 
 - **FORBIDDEN**: `ethers.js`, `web3.js`, `RainbowKit`, `ConnectKit`, `gill`.
 - **REQUIRED**: `viem`, `@wagmi/core`, `@solana/kit` (Solana), `@tuwaio/orbit-solana`.
+- **CLOUD IMPORT**: The import of an organization exported from the Cloud edition lives in `apps/dashboard/src/lib/cloud-transfer/` (routes `app/api/v1/admin/cloud-import/*`, admin view `/admin/cloud-import`). Export records use the Payload/Drizzle field names of their tables; a new required field or a changed meaning bumps `EXPORT_VERSION` (`envelope.ts`). The import routes are left out of the `proxy.ts` matcher (Next keeps only the first 10 MB of a body behind a proxy) and check the origin themselves.
 - **SOLANA CHAIN IDS**: Transactions, RPC overrides and webhooks name a Solana cluster by its CAIP-2 chain ID with the genesis hash (`solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` is devnet). Pulsar before 0.9 sends the Wallet Standard name (`solana:devnet`), so the Engine stores `solanaCaip2ChainId(chainId)` and matches stored rows with `solanaChainIdAliases(chainId)` (`apps/server/src/lib/solana-chain.ts`, built on `@tuwaio/orbit-core`). Never compare a Solana chain ID as a plain string, and never hard-code a second genesis table.
 - **SCHEMA AUTHORITY**: Payload CMS owns the database schema. **NEVER** use Drizzle (`drizzle-kit push` / `pnpm db:push`) to apply schema changes to staging/production databases. All production schema changes must go through Payload migrations (`pnpm db:migrate`), ensuring partitioned tables metadata remains intact. Create them as described in §2.2.1.
 
@@ -66,6 +67,8 @@ The Payload config knows nothing about partitions, but the init migration and it
 5. Backfill data before `SET NOT NULL`, and check for duplicates before a new unique index. Test with the edge cases seeded.
 6. `pnpm generate:db-schema` and `pnpm generate:types`.
 7. `pnpm db:migrate:create <anything> --skip-empty` must now create nothing.
+
+Payload gives every relationship column `ON DELETE set null`, which a required (NOT NULL) one can never carry out, so the parent collection's `beforeDelete` deletes the children. The exception is `webhook_deliveries.endpoint_id`: it cascades in SQL (`20261003_212609_webhook_deliveries_cascade`), because the engine writes deliveries while an endpoint is being deleted. Keep it; `apps/dashboard/src/tests/migrations-cascades.test.ts` fails without it.
 
 ### 2.3 State Management & Scaling
 

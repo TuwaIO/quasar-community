@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { createPartitionSql, monthlyPartition, type PartitionedTable } from '@tuwaio/shared/partitions';
 import { sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import Redlock from 'redlock';
@@ -65,37 +66,11 @@ export class PartitionManagerService implements OnModuleInit {
       throw new Error(`Table ${table} is not allowed for partitioning`);
     }
 
-    const year = startDate.getUTCFullYear();
-    const month = (startDate.getUTCMonth() + 1).toString().padStart(2, '0');
-    const partitionName = `${table}_y${year}_m${month}`;
-
-    const endDate = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth() + 1, 1));
-
-    const startStr = startDate.toISOString().split('T')[0];
-    const endStr = endDate.toISOString().split('T')[0];
+    const partition = monthlyPartition(table as PartitionedTable, startDate);
+    const partitionName = partition.name;
 
     try {
-      // PL/pgSQL block with quote_ident for safe dynamic SQL execution
-      await this.db.execute(
-        sql.raw(`
-        DO $$
-        BEGIN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_class c 
-            JOIN pg_namespace n ON n.oid = c.relnamespace 
-            WHERE c.relname = quote_ident('${partitionName}')
-          ) THEN
-            EXECUTE format(
-              'CREATE TABLE %I PARTITION OF %I FOR VALUES FROM (%L) TO (%L)',
-              '${partitionName}',
-              '${table}',
-              '${startStr}',
-              '${endStr}'
-            );
-          END IF;
-        END $$;
-      `),
-      );
+      await this.db.execute(sql.raw(createPartitionSql(partition)));
 
       this.logger.debug(`[PartitionManager] Ensured partition ${partitionName} exists.`);
     } catch (err) {

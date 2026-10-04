@@ -4,8 +4,6 @@ import crypto from 'crypto';
 import Redis from 'ioredis';
 import type { Payload } from 'payload';
 
-import { QUEUE_FAST, QUEUE_LAZY } from '../../constants';
-
 // UI Redis: Rate limiting, 2FA locks, sessions (dashboard-only ephemeral state)
 const uiRedisUrl = resolveEnvUrl(process.env.REDIS_UI_URL || '');
 const isUiCluster = process.env.REDIS_UI_MODE === 'cluster';
@@ -343,19 +341,4 @@ export async function getInternalSecret(): Promise<string> {
   // is returned.
   const previous = await redisApi.get('{system}:internal_secret:previous');
   return previous || process.env.INTERNAL_SECRET || '';
-}
-
-// --- QUEUE DEFINITIONS ---
-
-export async function enqueueTransaction(txKey: string, mode: 'fast' | 'lazy') {
-  const queueName = mode === 'fast' ? QUEUE_FAST : QUEUE_LAZY;
-  const queue = getQueue(queueName);
-
-  await queue.add(
-    'process-tx',
-    { txKey },
-    {
-      jobId: txKey, // Prevent duplicate jobs for the same txKey
-    },
-  );
 }

@@ -22,7 +22,10 @@ async function partitionsCreatedAt(now: string): Promise<string[][]> {
   await new PartitionManagerService(db as never, redlock as never).ensurePartitions();
 
   return statements.flatMap((statement) => {
-    const match = /'(transactions_y\d{4}_m\d{2})',\s*'transactions',\s*'([\d-]+)',\s*'([\d-]+)'/.exec(statement);
+    const match =
+      /"(transactions_y\d{4}_m\d{2})" PARTITION OF "transactions" FOR VALUES FROM \('([\d-]+)'\) TO \('([\d-]+)'\)/.exec(
+        statement,
+      );
     return match ? [[match[1], match[2], match[3]]] : [];
   });
 }

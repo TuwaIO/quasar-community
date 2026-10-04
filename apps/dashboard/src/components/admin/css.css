@@ -19,7 +19,6 @@
   --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
 }
 
-
 /*
  * Payload's list table already scrolls horizontally; `width: 100%` on both the
  * wrapper and the table was what took that away. Constrained to the wrapper,
@@ -41,3 +40,140 @@
   min-width: max-content;
 }
 
+/* Import of a Cloud export: the dashboard card and /admin/cloud-import (Community Edition) */
+.cloud-import-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--base) * 0.75);
+  margin-bottom: calc(var(--base) * 1.5);
+  padding: calc(var(--base) * 0.9) calc(var(--base) * 1.1);
+  border: 1px solid var(--theme-elevation-150);
+  border-radius: var(--style-radius-m);
+  background: var(--theme-elevation-50);
+}
+
+.cloud-import-card__title {
+  margin: 0 0 calc(var(--base) * 0.25);
+}
+
+.cloud-import-card__text {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--theme-elevation-700);
+}
+
+.cloud-import-card__button {
+  margin: 0;
+  text-decoration: none;
+}
+
+.cloud-import__heading {
+  margin-bottom: calc(var(--base) * 1);
+}
+
+.cloud-import {
+  max-width: 760px;
+}
+
+.cloud-import__section {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--base) * 0.6);
+  margin-bottom: calc(var(--base) * 2);
+}
+
+.cloud-import__section ul {
+  margin: 0;
+  padding-left: calc(var(--base) * 1.2);
+}
+
+.cloud-import__field {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--base) * 0.25);
+}
+
+.cloud-import__field input[type='text'],
+.cloud-import__field input[type='password'] {
+  padding: calc(var(--base) * 0.4) calc(var(--base) * 0.6);
+  border: 1px solid var(--theme-elevation-150);
+  border-radius: var(--style-radius-s);
+  background: var(--theme-input-bg);
+  color: var(--theme-text);
+  font-family: var(--font-mono);
+}
+
+.cloud-import__error {
+  padding: calc(var(--base) * 0.6) calc(var(--base) * 0.8);
+  border: 1px solid var(--theme-error-500);
+  border-radius: var(--style-radius-s);
+  background: var(--theme-error-50);
+  color: var(--theme-error-750);
+}
+
+.cloud-import__error p {
+  margin: 0;
+}
+
+.cloud-import progress {
+  width: 100%;
+}
+
+.cloud-import__muted {
+  margin: 0;
+  color: var(--theme-elevation-600);
+}
+
+/* File picker of the import: the native input stays focusable, the label is what people see and drop files on */
+.cloud-import__dropzone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--base) * 0.2);
+  padding: calc(var(--base) * 1.4) calc(var(--base) * 1);
+  border: 1px dashed var(--theme-elevation-250);
+  border-radius: var(--style-radius-m);
+  background: var(--theme-elevation-50);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+
+.cloud-import__dropzone:hover,
+.cloud-import__dropzone--active {
+  border-color: var(--theme-elevation-500);
+  background: var(--theme-elevation-100);
+}
+
+.cloud-import__dropzone--selected {
+  border-style: solid;
+  border-color: var(--theme-success-500);
+}
+
+.cloud-import__dropzone:focus-within {
+  outline: 2px solid var(--theme-elevation-900);
+  outline-offset: 2px;
+}
+
+.cloud-import__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.cloud-import__dropzone-title {
+  overflow-wrap: anywhere;
+  color: var(--theme-text);
+}
+
+.cloud-import__dropzone-hint {
+  color: var(--theme-elevation-600);
+  font-size: calc(var(--base) * 0.6);
+}

@@ -13,10 +13,18 @@ export const adminConfig: Config['admin'] = {
     baseDir: path.resolve(dirname, '..'),
   },
   components: {
+    // Import of a Cloud export. Registered in both editions so they share one import map: the components render
+    // only on a Community Edition node (constants/edition.ts)
+    beforeDashboard: ['@/components/admin/CloudImportCard'],
     views: {
       login: {
         Component: '@/components/admin/CustomLogin',
         path: '/login' as const,
+      },
+      cloudImport: {
+        Component: '@/components/admin/CloudImportView',
+        path: '/cloud-import' as const,
+        meta: { title: 'Import from Cloud' },
       },
     },
   },

@@ -282,6 +282,33 @@ The history API and the RPC overrides accept both forms. If a webhook consumer
 compares `chainId` with `solana:mainnet` or `solana:devnet`, update it before
 you upgrade.
 
+### Migrating from the Cloud edition
+
+An organization moves from the Cloud SaaS to this node with its apps, API keys, webhook signing secrets and
+transaction history, so client apps change only the `baseUrl` of `@tuwaio/quasar-sdk`.
+
+1. In the Cloud dashboard, an owner of the organization opens it and chooses **Export Organization**. After the
+   password (and 2FA) check, the dashboard shows an import key once (`QEX1-…`) and downloads an encrypted `.qex`
+   file. Every owner gets an email about the export.
+2. In this node's admin panel, choose **Import data from Cloud** on the dashboard, select the file and enter the key.
+   The analysis lists what will be created, what is already here and what is left out, before anything is written.
+3. Confirm with your password. The import shows its progress and a report. Transactions that were still pending in
+   the Cloud are handed to this node's trackers.
+4. Point your apps at this node. Then export and import once more: the second import adds the transactions created
+   in the meantime and updates those whose status changed, and leaves the settings you changed here alone. Deactivate
+   the apps in the Cloud afterwards; until then both sides may deliver webhooks for the same transaction.
+
+What is imported: the organization (with this node's limits; the admin becomes its owner), its apps with their keys,
+IP and domain allow-lists, RPC overrides and provider keys, its webhook endpoints, its Payments App records, all of
+its transactions and the webhook deliveries of the last 30 days. Members, billing and quota stay in the Cloud. An RPC
+URL or webhook endpoint this node's policy refuses (`ALLOW_INTERNAL_WEBHOOKS`, HTTPS in production, one localhost
+endpoint per organization) is left out and listed in the report.
+
+The file is encrypted (AES-256-GCM) with the key shown at export, and the node stores neither: keep the key apart
+from the file. The secrets in it are encrypted again with this node's `ENCRYPTION_KEY`. The node reads the upload as
+it streams in, so it sets no size limit of its own, but a reverse proxy in front of it may cap request bodies
+(Cloudflare's free plan allows 100 MB); raise that limit for a large export. Importing the same file again changes nothing.
+
 ### Workspace limits
 
 A Community node is single-tenant, and there is no billing in it to sell quota
