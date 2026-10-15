@@ -211,6 +211,28 @@ describe('Secret Key and Webhook Signing Secret Rotation Endpoints', () => {
       expect(mockRedisDel).toHaveBeenCalledWith('{old_secret_hash_value}:meta');
     });
 
+    // Payload leaves the hidden `secretKeyHash` out unless the call asks for hidden fields; without it the old key
+    // stayed in the engine's cache and kept working after the roll
+    it('reads the hidden hash of the old secret key to invalidate its cache', async () => {
+      mockAuthenticateRequest.mockResolvedValue({
+        payload: mockPayload,
+        user: { id: 'user_123', email: 'test@example.com' },
+      });
+      mockLogin.mockResolvedValue({});
+      mockVerifyOrgAccess.mockResolvedValue(true);
+      mockFindByID.mockImplementation(async (args: { showHiddenFields?: boolean }) => ({
+        id: 'app_123',
+        environment: 'live',
+        organization: { id: 'org_123' },
+        ...(args.showHiddenFields ? { secretKeyHash: 'old_secret_hash_value' } : {}),
+      }));
+
+      const res = await rollAppSecret(createRequest({ password: 'correct_password' }), { params });
+
+      expect(res.status).toBe(200);
+      expect(mockRedisDel).toHaveBeenCalledWith('{old_secret_hash_value}:meta');
+    });
+
     it('should roll successfully for test app environment', async () => {
       mockAuthenticateRequest.mockResolvedValue({
         payload: mockPayload,

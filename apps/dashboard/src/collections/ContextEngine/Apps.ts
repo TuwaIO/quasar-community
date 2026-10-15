@@ -20,6 +20,9 @@ const generateKey = (prefix: string) => {
   return `${prefix}${buffer.toString('hex')}`;
 };
 
+/** The `req.context` entry where `beforeDelete` keeps the hidden secret key hash of an app for `afterDelete`. */
+const deletedSecretKeyHashContextKey = (id: string | number) => `apps:${id}:secretKeyHash`;
+
 export const Apps: CollectionConfig = {
   slug: 'apps',
   disableDuplicate: true,
@@ -473,7 +476,20 @@ export const Apps: CollectionConfig = {
 
         if (operation === 'create' || operation === 'update') {
           const { bgRedisSync } = await import('@/lib/redis');
-          const secretKeyHash = appDoc.secretKeyHash;
+          // `secretKeyHash` is hidden, so Payload leaves it out of `doc`. Without it the engine kept serving the app's
+          // secret key from its cache (deactivation, IP allow list, keys) for up to 5 minutes.
+          const secretKeyHash =
+            appDoc.secretKeyHash ??
+            (
+              await req.payload.findByID({
+                collection: 'apps',
+                id: appDoc.id,
+                depth: 0,
+                overrideAccess: true,
+                showHiddenFields: true,
+                req,
+              })
+            )?.secretKeyHash;
           const publicKey = appDoc.publicKey;
 
           bgRedisSync(req.payload.logger, 'Apps-Sync', async () => {
@@ -509,6 +525,18 @@ export const Apps: CollectionConfig = {
     ],
     beforeDelete: [
       async ({ req, id }) => {
+        // The row is gone in afterDelete and `secretKeyHash` is hidden from its `doc`: keep the hash for the
+        // invalidation of the engine's cache there, or the deleted app's secret key keeps working until it expires
+        const app = await req.payload.findByID({
+          collection: 'apps',
+          id,
+          depth: 0,
+          overrideAccess: true,
+          showHiddenFields: true,
+          req,
+        });
+        req.context[deletedSecretKeyHashContextKey(id)] = app?.secretKeyHash;
+
         // Cascade delete Transactions
         await req.payload.delete({
           collection: 'transactions',
@@ -545,7 +573,8 @@ export const Apps: CollectionConfig = {
     afterDelete: [
       async ({ doc, req }) => {
         const appDoc = doc as unknown as App;
-        const secretKeyHash = appDoc.secretKeyHash;
+        const secretKeyHash =
+          appDoc.secretKeyHash ?? (req.context[deletedSecretKeyHashContextKey(appDoc.id)] as string | null | undefined);
         const publicKey = appDoc.publicKey;
 
         if (secretKeyHash || publicKey) {

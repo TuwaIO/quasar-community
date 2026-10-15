@@ -1,5 +1,12 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { createPartitionSql, monthlyPartition, type PartitionedTable } from '@tuwaio/shared/partitions';
+import { RETENTION } from '@tuwaio/shared/constants';
+import {
+  createPartitionSql,
+  dropPartitionSql,
+  expiredMonthlyPartitions,
+  monthlyPartition,
+  type PartitionedTable,
+} from '@tuwaio/shared/partitions';
 import { sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import Redlock from 'redlock';
@@ -57,6 +64,46 @@ export class PartitionManagerService implements OnModuleInit {
         this.logger.debug('[PartitionManager] Another instance is already managing partitions.');
       } else {
         this.logger.error('[PartitionManager] Critical error during partition management:', err);
+      }
+    }
+  }
+
+  /**
+   * Detaches and drops the monthly partitions of `webhook_deliveries` whose rows are all past the retention period of
+   * delivery logs (`RETENTION.WEBHOOK_DELIVERY_MONTHS`, the Privacy Policy and Section 10 of the DPA). Transactions are
+   * never dropped here: they live as long as their app. Uses Redlock so that one instance does it.
+   */
+  async dropExpiredPartitions() {
+    const LOCK_KEY = 'lock:global:partition-retention';
+    const table: PartitionedTable = 'webhook_deliveries';
+
+    try {
+      await (this.redlock as any).using([LOCK_KEY], 60000, async () => {
+        const result = await this.db.execute<{ name: string }>(sql`
+          SELECT child.relname AS name
+          FROM pg_inherits
+          JOIN pg_class parent ON parent.oid = pg_inherits.inhparent
+          JOIN pg_class child ON child.oid = pg_inherits.inhrelid
+          WHERE parent.relname = ${table}`);
+        const names = result.rows.map((row) => row.name);
+
+        for (const name of expiredMonthlyPartitions(table, names, new Date(), RETENTION.WEBHOOK_DELIVERY_MONTHS)) {
+          try {
+            for (const statement of dropPartitionSql(table, name)) {
+              await this.db.execute(sql.raw(statement));
+            }
+            this.logger.log(`[PartitionManager] Dropped expired partition ${name}.`);
+          } catch (err) {
+            // The next daily run tries again
+            this.logger.error(`[PartitionManager] Failed to drop expired partition ${name}:`, err);
+          }
+        }
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === 'ExecutionError') {
+        this.logger.debug('[PartitionManager] Another instance is already dropping expired partitions.');
+      } else {
+        this.logger.error('[PartitionManager] Critical error while dropping expired partitions:', err);
       }
     }
   }

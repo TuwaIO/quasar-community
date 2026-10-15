@@ -11,22 +11,12 @@ Sentry.init({
   enabled: process.env.NODE_ENV === 'production',
   environment: process.env.NODE_ENV,
 
-  integrations: [
-    Sentry.replayIntegration({
-      // Selective PII: mask all text to prevent secrets from leaking
-      maskAllText: true,
-      maskAllInputs: true,
-      blockAllMedia: true,
-    }),
-    Sentry.browserTracingIntegration(),
-  ],
+  // No Session Replay: it keeps a key in sessionStorage and records the screen, which the Cookie Policy does not
+  // cover without consent; error reports and traces are enough
+  integrations: [Sentry.browserTracingIntegration()],
 
   // Free plan: conservative sampling (5%)
   tracesSampleRate: 0.05,
-
-  // Session Replay: only capture on errors to conserve free plan quota (50 replays/month)
-  replaysSessionSampleRate: 0,
-  replaysOnErrorSampleRate: 1.0,
 
   // Selective PII: don't auto-collect, attach manually via Sentry.setUser()
   dataCollection: SENTRY_DATA_COLLECTION,

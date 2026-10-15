@@ -103,6 +103,7 @@ export const alchemyNetworkMap: Record<number | string, string> = {
   81457: "blast-mainnet",
   84532: "base-sepolia",
   91342: "giwa-sepolia",
+  99801: "elysium-testnet",
   99999: "adi-testnet",
   202601: "ronin-saigon",
   421614: "arb-sepolia",

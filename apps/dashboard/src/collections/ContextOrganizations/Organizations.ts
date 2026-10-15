@@ -1,3 +1,4 @@
+import { DATA_PROCESSING } from '@tuwaio/shared/constants';
 import { createId } from '@tuwaio/shared/cuid';
 import type { CollectionConfig } from 'payload';
 
@@ -6,6 +7,7 @@ import {
   COMMUNITY_WORKSPACE_RPS_FOREVER,
   COMMUNITY_WORKSPACE_RPS_LIMIT,
 } from '@/constants/community';
+import { EDITION } from '@/constants/edition';
 import {
   isAdminFieldLevel,
   isAuthenticated,
@@ -144,11 +146,15 @@ export const Organizations: CollectionConfig = {
           ).catch((err) => console.error('[Organizations] Redis sync failed:', (err as Error).message));
         }
 
-        // --- RPS limit: EngineGuard caches it per app, not per organization ---
+        // --- RPS limit and data processing: EngineGuard caches them per app, not per organization ---
         // Covers an admin edit, the RPS adjust route and the seed raising a
         // workspace to its limits; without it the engine would keep the old
-        // limit until each app's `{…}:meta` entry expired.
-        if (operation === 'update' && Number(previousDoc?.rpsLimit) !== Number(doc.rpsLimit)) {
+        // limit, or refuse or accept transactions, until each app's `{…}:meta`
+        // entry expired.
+        if (
+          operation === 'update' &&
+          (Number(previousDoc?.rpsLimit) !== Number(doc.rpsLimit) || previousDoc?.dataProcessing !== doc.dataProcessing)
+        ) {
           const { bgRedisSync, invalidateOrganizationAppMetadata } = await import('@/lib/redis');
           bgRedisSync(req.payload.logger, 'Organizations-RpsSync', () =>
             invalidateOrganizationAppMetadata(req.payload, doc.id),
@@ -363,6 +369,31 @@ export const Organizations: CollectionConfig = {
       admin: {
         description: 'If enabled, the RPS limit for this organization will never expire or reset.',
         position: 'sidebar',
+      },
+    },
+    {
+      // The engine refuses the organization's transactions while this is `pending` (Cloud edition only:
+      // apps/server/src/common/data-processing.ts). Field access covers create as well, so nobody but a system admin
+      // can open the intake by creating an organization with the field already set.
+      name: 'dataProcessing',
+      type: 'select',
+      required: true,
+      defaultValue: DATA_PROCESSING.PENDING,
+      options: [
+        { label: 'Pending: transactions are refused', value: DATA_PROCESSING.PENDING },
+        { label: 'Own organization of the operator', value: DATA_PROCESSING.OWN },
+      ],
+      access: {
+        create: isAdminFieldLevel,
+        update: isAdminFieldLevel,
+      },
+      admin: {
+        position: 'sidebar',
+        condition: () => EDITION === 'cloud',
+        description:
+          'Whether the apps of this organization may send transactions. Pending until the organization concludes the ' +
+          'Data Processing Addendum, and the standard contractual clauses where they apply. Set "Own organization" ' +
+          'only for organizations of the operator itself, which controls their data.',
       },
     },
   ],

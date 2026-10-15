@@ -1,3 +1,4 @@
+import { DATA_PROCESSING } from '@tuwaio/shared/constants';
 import { createId } from '@tuwaio/shared/cuid';
 import { Payload } from 'payload';
 
@@ -78,6 +79,20 @@ export async function seedWorkspace(payload: Payload, adminUser: any, options: S
   if (orgs.length > 0) {
     const existing = orgs[0];
 
+    // `Users.afterChange` creates the admin's workspace before this runs, with the default `pending`. The workspace of
+    // the deployment's admin belongs to the operator, which controls the data of its apps itself: mark it as such,
+    // never the other way round. overrideAccess: the field is admin-only and the seed has no user.
+    if (existing.dataProcessing !== DATA_PROCESSING.OWN) {
+      await payload.update({
+        collection: 'organizations',
+        id: existing.id as string,
+        data: { dataProcessing: DATA_PROCESSING.OWN },
+        overrideAccess: true,
+        context: { skipAuthCheck: true },
+      });
+      payload.logger.info(`[Seed] Marked workspace ${existing.id} as an organization of the operator.`);
+    }
+
     if (!options.enforceLimits) {
       payload.logger.info(`[Seed] Found existing workspace: ${existing.id}. Preserving quota and balance.`);
       return existing.id as string | number;
@@ -123,6 +138,8 @@ export async function seedWorkspace(payload: Payload, adminUser: any, options: S
       rpsLimit,
       rpsPaidLimit,
       quotaUsed: 0,
+      // The admin's workspace belongs to the operator of the deployment, which controls the data of its apps itself
+      dataProcessing: DATA_PROCESSING.OWN,
       ...(options.enforceLimits && options.rpsForever ? { rpsForever: true } : {}),
     },
     context: { skipAuthCheck: true },

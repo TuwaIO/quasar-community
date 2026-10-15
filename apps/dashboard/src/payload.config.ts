@@ -13,11 +13,6 @@ import { plugins } from './payload/plugins';
 const filename = fileURLToPath(import.meta.url);
 const dirname = path.dirname(filename);
 
-// Neutralize libheif vulnerability in sharp (GHSA-rgj7-g3m4-5g8c)
-if (typeof sharp.block === 'function') {
-  sharp.block({ operation: ['VipsForeignLoadHeif'] });
-}
-
 // Validate encryption key on startup
 try {
   getEncryptionKey();

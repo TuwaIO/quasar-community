@@ -4,6 +4,7 @@ import { decrypt } from '@tuwaio/shared/encryption';
 import * as crypto from 'crypto';
 import { Redis } from 'ioredis';
 
+import { areSystemProviderKeysEnabled } from '../common/provider-policy';
 import { REDIS } from '../redis/redis.module';
 
 const AML_TOKEN_KEY = 'quasar:aml:token';
@@ -185,7 +186,7 @@ export class AmlService {
     let appKey = customApiKey ? decrypt(customApiKey) : null;
     let appSecret = customApiSecret ? decrypt(customApiSecret) : null;
 
-    if (!appKey || !appSecret) {
+    if ((!appKey || !appSecret) && areSystemProviderKeysEnabled()) {
       // Fall back to system credentials (FALLBACK_GOPLUS_APP_KEY first, then standard GOPLUS_APP_KEY)
       appKey =
         this.configService.get<string>('FALLBACK_GOPLUS_APP_KEY') ||

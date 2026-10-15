@@ -66,7 +66,7 @@ CVE-2026-12151
 
 # Owner: security
 # Expiry: 2027-07-27
-# Rationale: Transitive subdependencies in build tooling (brace-expansion, tar, fast-uri, find-my-way, sharp). Overrides set in pnpm-workspace.yaml, ignored in Trivy scanner to prevent CI pipeline blocks.
+# Rationale: Transitive subdependencies in build tooling (brace-expansion, tar, fast-uri, find-my-way, ip-address). Overrides set in pnpm-workspace.yaml, ignored in Trivy scanner to prevent CI pipeline blocks.
 CVE-2026-14257
 CVE-2026-69152
 CVE-2026-18446
@@ -76,7 +76,6 @@ CVE-2026-59874
 CVE-2026-13676
 CVE-2026-16221
 CVE-2026-47219
-GHSA-f88m-g3jw-g9cj
 CVE-2026-75899
 CVE-2026-75931
 CVE-2026-75975
@@ -85,7 +84,4 @@ GHSA-fph4-wmhf-6fwf
 GHSA-jqff-g426-hqxp
 CVE-2026-73566
 GHSA-95cm-9764-hp5p
-GHSA-rgj7-g3m4-5g8c
-GHSA-g89c-p67h-r497
-GHSA-2jg2-4ch7-h545
 

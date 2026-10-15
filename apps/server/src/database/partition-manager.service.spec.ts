@@ -59,4 +59,58 @@ describe('PartitionManagerService', () => {
       '2026-11-01',
     ]);
   });
+
+  it('detaches and drops the delivery-log partitions whose rows are all past the retention period', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T00:00:00Z'));
+
+    const statements: string[] = [];
+    const db = {
+      execute: vi.fn(async (query: SQL) => {
+        const text = new PgDialect().sqlToQuery(query).sql;
+        statements.push(text);
+        if (text.includes('pg_inherits')) {
+          return {
+            rows: [
+              { name: 'webhook_deliveries_y2026_m06' },
+              { name: 'webhook_deliveries_y2026_m07' },
+              { name: 'webhook_deliveries_y2026_m08' },
+              { name: 'webhook_deliveries_y2026_m10' },
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    const redlock = { using: vi.fn(async (_keys: string[], _ttl: number, run: () => Promise<void>) => run()) };
+
+    await new PartitionManagerService(db as never, redlock as never).dropExpiredPartitions();
+
+    expect(statements.filter((statement) => !statement.includes('pg_inherits'))).toEqual([
+      'ALTER TABLE "webhook_deliveries" DETACH PARTITION "webhook_deliveries_y2026_m06"',
+      'DROP TABLE IF EXISTS "webhook_deliveries_y2026_m06"',
+      'ALTER TABLE "webhook_deliveries" DETACH PARTITION "webhook_deliveries_y2026_m07"',
+      'DROP TABLE IF EXISTS "webhook_deliveries_y2026_m07"',
+    ]);
+    expect(redlock.using).toHaveBeenCalledTimes(1);
+  });
+
+  it('never drops a partition of transactions', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2027-10-01T00:00:00Z'));
+
+    const statements: string[] = [];
+    const db = {
+      execute: vi.fn(async (query: SQL) => {
+        const text = new PgDialect().sqlToQuery(query).sql;
+        statements.push(text);
+        return text.includes('pg_inherits') ? { rows: [{ name: 'transactions_y2026_m01' }] } : { rows: [] };
+      }),
+    };
+    const redlock = { using: vi.fn(async (_keys: string[], _ttl: number, run: () => Promise<void>) => run()) };
+
+    await new PartitionManagerService(db as never, redlock as never).dropExpiredPartitions();
+
+    expect(statements.some((statement) => statement.includes('DROP') || statement.includes('DETACH'))).toBe(false);
+  });
 });

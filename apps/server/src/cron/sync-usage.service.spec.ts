@@ -252,4 +252,40 @@ describe('SyncUsageService (Integration)', () => {
     expect(transactionCount).toBe(2);
     expect(db.update).toHaveBeenCalledTimes(1);
   });
+
+  it('Test 8 (Deleted Organization): drops the usage of an organization that no longer exists instead of reclaiming it forever', async () => {
+    redis.eval.mockResolvedValue(1);
+    redis.get.mockResolvedValue('50');
+    // Postgres refuses the ledger row: the organization was deleted while its usage waited in Redis
+    const fkViolation = Object.assign(new Error('Failed query: insert into "quota_usage_ledger"'), {
+      cause: Object.assign(new Error('violates foreign key constraint'), {
+        code: '23503',
+        constraint: 'quota_usage_ledger_organization_id_organizations_id_fk',
+      }),
+    });
+    db.transaction.mockImplementation(async (callback: (trx: any) => Promise<unknown>) =>
+      callback({
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }),
+          }),
+        }),
+        insert: vi.fn().mockReturnValue({ values: vi.fn().mockRejectedValue(fkViolation) }),
+        update: db.update,
+      }),
+    );
+    const warn = vi.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
+
+    await service.syncUsageToDb();
+
+    expect(redis.incrbyfloat).not.toHaveBeenCalled();
+    expect(redis.del).toHaveBeenCalledWith(
+      '{org_1}:sync',
+      '{org_1}:sync:batch',
+      '{org_1}:usage',
+      '{org_1}:usage:batch',
+      '{org_1}:limit',
+    );
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('org_1 no longer exists'));
+  });
 });

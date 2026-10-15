@@ -1,6 +1,6 @@
 import { generate } from '@pdfme/generator';
 import { image, line, text } from '@pdfme/schemas';
-import { getChainName } from '@tuwaio/sdk/nova-core';
+import { getChainName } from '@tuwaio/sdk/nova-core/utils';
 import fs from 'fs';
 import { NextResponse } from 'next/server';
 import path from 'path';

@@ -59,7 +59,13 @@ export const POST = withRateLimit(
       if (access instanceof NextResponse) return access;
 
       // 2. Fetch App and verify organization scope
-      const appData = await payload.findByID({ collection: 'apps', id: appId, overrideAccess: true });
+      // showHiddenFields: `secretKeyHash` is hidden, and without it the old key stayed in the engine's cache after the roll
+      const appData = await payload.findByID({
+        collection: 'apps',
+        id: appId,
+        overrideAccess: true,
+        showHiddenFields: true,
+      });
       if (!appData) {
         return NextResponse.json({ error: 'App not found' }, { status: 404 });
       }

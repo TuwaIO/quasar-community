@@ -1,7 +1,7 @@
 'use client';
 
 import { InformationCircleIcon } from '@heroicons/react/24/outline';
-import { cn } from '@tuwaio/sdk/nova-core';
+import { cn } from '@tuwaio/sdk/nova-core/utils';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ComponentType, InputHTMLAttributes } from 'react';
 

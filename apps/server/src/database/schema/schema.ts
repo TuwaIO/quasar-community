@@ -12,6 +12,7 @@ export const enumConnectedWalletsChainType = pgEnum("enum_connected_wallets_chai
 export const enumInvoicesCurrency = pgEnum("enum_invoices_currency", ['USD'])
 export const enumInvoicesStatus = pgEnum("enum_invoices_status", ['pending', 'paid', 'failed', 'expired', 'cancelled'])
 export const enumOrganizationMembersRole = pgEnum("enum_organization_members_role", ['owner', 'admin', 'member'])
+export const enumOrganizationsDataProcessing = pgEnum("enum_organizations_data_processing", ['pending', 'own'])
 export const enumOutboxEventsStatus = pgEnum("enum_outbox_events_status", ['pending', 'processed', 'failed'])
 export const enumQuotaUsageLedgerStatus = pgEnum("enum_quota_usage_ledger_status", ['applied', 'manual-review'])
 export const enumSystemPricingBaseCurrency = pgEnum("enum_system_pricing_base_currency", ['USD'])
@@ -19,7 +20,8 @@ export const enumTransactionsAdapter = pgEnum("enum_transactions_adapter", ['evm
 export const enumTransactionsAmlStatus = pgEnum("enum_transactions_aml_status", ['not_applicable', 'pending', 'passed', 'flagged', 'failed'])
 export const enumTransactionsStatus = pgEnum("enum_transactions_status", ['Failed', 'Success', 'Replaced'])
 export const enumTransactionsSyncStatus = pgEnum("enum_transactions_sync_status", ['synced', 'pending-sync'])
-export const enumTransactionsTracker = pgEnum("enum_transactions_tracker", ['ethereum', 'safe', 'gelato', 'solana', 'erc4337'])
+export const enumTransactionsTracker = pgEnum("enum_transactions_tracker", ['ethereum', 'safe', 'gelato', 'solana', 'erc4337', 'eip5792'])
+export const enumTransactionsConfirmationStatus = pgEnum("enum_transactions_confirmation_status", ['processed', 'confirmed', 'finalized'])
 export const enumUsersRoles = pgEnum("enum_users_roles", ['admin', 'user'])
 export const enumWebhookEndpointsEvents = pgEnum("enum_webhook_endpoints_events", ['*', 'transaction:success', 'transaction:failed', 'transaction:replaced'])
 
@@ -129,13 +131,14 @@ export const organizations = pgTable("organizations", {
 	name: varchar().notNull(),
 	slug: varchar(),
 	createdBy: varchar("created_by").notNull(),
-	quotaBalance: numeric("quota_balance").default('100').notNull(),
+	quotaBalance: numeric("quota_balance").default('1000').notNull(),
 	rpsLimit: numeric("rps_limit").default('5').notNull(),
 	rpsPaidLimit: numeric("rps_paid_limit").default('5').notNull(),
 	rpsExpiresAt: timestamp("rps_expires_at", { precision: 3, withTimezone: true, mode: 'string' }),
 	paymentGatewayID: varchar("payment_gateway_i_d"),
 	quotaUsed: numeric("quota_used").default('0').notNull(),
 	rpsForever: boolean("rps_forever").default(false),
+	dataProcessing: enumOrganizationsDataProcessing("data_processing").default('pending'),
 	updatedAt: timestamp("updated_at", { precision: 3, withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	createdAt: timestamp("created_at", { precision: 3, withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
@@ -981,6 +984,8 @@ export const transactions = pgTable("transactions", {
 	slot: numeric(),
 	recentBlockhash: varchar("recent_blockhash"),
 	instructions: jsonb(),
+	confirmationStatus: enumTransactionsConfirmationStatus("confirmation_status"),
+	lastValidBlockHeight: numeric("last_valid_block_height"),
 	actualFee: jsonb("actual_fee"),
 	contractAddress: varchar("contract_address"),
 	appInvoiceId: varchar("app_invoice_id_id"),

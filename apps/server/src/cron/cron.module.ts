@@ -13,6 +13,7 @@ import { OutboxProcessorService } from './outbox-processor.service';
 import { PartitionCronService } from './partition-cron.service';
 import { PendingTxSweeperService } from './pending-tx-sweeper.service';
 import { QueueHealthCronService } from './queue-health-cron.service';
+import { RecordRetentionService } from './record-retention.service';
 import { RedisCleanupService } from './redis-cleanup.service';
 import { SyncUsageService } from './sync-usage.service';
 
@@ -40,6 +41,7 @@ if (isWorker) {
     PartitionCronService,
     QueueHealthCronService,
     PendingTxSweeperService,
+    RecordRetentionService,
   );
 }
 

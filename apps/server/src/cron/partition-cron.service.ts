@@ -13,6 +13,8 @@ export class PartitionCronService {
   async handlePartitionMaintenance() {
     this.logger.log('Starting scheduled partition maintenance...');
     await this.partitionManager.ensurePartitions();
+    // Delivery logs are kept for a limited time (Privacy Policy, DPA Section 10)
+    await this.partitionManager.dropExpiredPartitions();
     this.logger.log('Scheduled partition maintenance complete.');
   }
 }

@@ -44,6 +44,10 @@ const gelato = (updateDbTx: any) => processGelatoTx(tx, vi.fn(), updateDbTx, db,
 describe('Safe and Gelato failure reasons (Pulsar 0.8 fetchers)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The app in `db` has no Gelato key of its own; gelato.spec.ts covers the credential rules
+    vi.stubEnv('SYSTEM_PROVIDER_KEYS_ENABLED', 'true');
+    vi.stubEnv('GELATO_API_KEY', 'system-gelato');
+    vi.stubEnv('SAFE_TRANSACTION_SERVICE_ENABLED', 'true');
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
   });

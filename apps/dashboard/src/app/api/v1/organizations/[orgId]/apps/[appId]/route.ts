@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccess } from '@/lib/auth-utils';
+import { isAmlScreeningEnabled, isOwnRpcRequired } from '@/lib/providerPolicy';
 import type { App } from '@/payload-types';
 
 const UpdateAppSchema = z.object({
@@ -56,6 +57,7 @@ function sanitizeApp(a: App): any {
     paymentSettings: a.paymentSettings
       ? {
           amlEnabled: a.paymentSettings.amlEnabled,
+          amlAvailable: isAmlScreeningEnabled(),
           appInvoiceTemplate: a.paymentSettings.appInvoiceTemplate,
           goPlusApiKey: a.paymentSettings.goPlusApiKey ? maskKey(decrypt(a.paymentSettings.goPlusApiKey)) : undefined,
           goPlusApiSecret: a.paymentSettings.goPlusApiSecret
@@ -63,6 +65,7 @@ function sanitizeApp(a: App): any {
             : undefined,
         }
       : null,
+    ownRpcRequired: isOwnRpcRequired(),
     rpcConfigs:
       (a.rpcConfigs as any[])?.map((r: any) => ({
         chainId: r.chainId,

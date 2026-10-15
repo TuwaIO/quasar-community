@@ -68,6 +68,8 @@ const F = {
   instructions: 'instructions',
   recentBlockhash: 'recentBlockhash',
   slot: 'slot',
+  confirmationStatus: 'confirmationStatus',
+  lastValidBlockHeight: 'lastValidBlockHeight',
 
   // --- Starknet Specific Fields ---
   actualFee: 'actualFee',
@@ -386,6 +388,17 @@ const solanaFields: Field[] = [
   { name: F.slot, type: 'number' },
   { name: F.recentBlockhash, type: 'text' },
   { name: F.instructions, type: 'json', validate: () => true },
+  {
+    name: F.confirmationStatus,
+    type: 'select',
+    options: ['processed', 'confirmed', 'finalized'],
+    admin: { description: 'Commitment reached: `confirmed` within a second, `finalized` when it succeeds.' },
+  },
+  {
+    name: F.lastValidBlockHeight,
+    type: 'number',
+    admin: { description: 'Past this block height an unknown signature can no longer land: the tracker fails it.' },
+  },
 ];
 
 const starknetFields: Field[] = [

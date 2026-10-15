@@ -140,6 +140,20 @@ describe('Auth Security and App Response Sanitization', () => {
       expect(data.rpcConfigs[0].rpcUrl).toContain('...');
     });
 
+    it('tells the dashboard whether the app needs its own RPC provider', async () => {
+      mockFindByID.mockResolvedValue(mockApp);
+      const params = () => Promise.resolve({ orgId: 'org_1', appId: 'app_1' });
+      const req = () => new Request('http://localhost/api/v1/organizations/org_1/apps/app_1');
+
+      vi.stubEnv('SYSTEM_PROVIDER_KEYS_ENABLED', '');
+      vi.stubEnv('PUBLIC_RPC_FALLBACK_ENABLED', '');
+      expect((await (await getApp(req(), { params: params() })).json()).ownRpcRequired).toBe(true);
+
+      vi.stubEnv('PUBLIC_RPC_FALLBACK_ENABLED', 'true');
+      expect((await (await getApp(req(), { params: params() })).json()).ownRpcRequired).toBe(false);
+      vi.unstubAllEnvs();
+    });
+
     it('should sanitize app object in PATCH response, masking keys', async () => {
       mockFindByID.mockResolvedValue(mockApp);
       mockUpdate.mockResolvedValue(mockApp);

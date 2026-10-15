@@ -6,6 +6,8 @@ import { Transaction } from '@tuwaio/quasar-sdk';
 import { Counter, Gauge } from 'prom-client';
 import { Hex, zeroHash } from 'viem';
 
+import { isSafeTransactionServiceEnabled } from '../../common/provider-policy';
+
 type UpdateFn = (txKey: string, data: UpdatableTransactionFields, isTerminal?: boolean) => Promise<void>;
 
 export async function processSafeTx(
@@ -20,6 +22,9 @@ export async function processSafeTx(
   if (!tx.txKey) {
     console.error(`[SAFE TRACKER] Missing txKey for tracking.`);
     return;
+  }
+  if (!isSafeTransactionServiceEnabled()) {
+    throw new Error(`[SAFE TRACKER] The Safe Transaction Service is not enabled on this deployment.`);
   }
   initializePollingTracker({
     tx,

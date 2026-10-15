@@ -7,6 +7,7 @@ import { default as default_abe12c08842b92b1a0c0fdad30ef6deb } from '@/component
 import { default as default_f62d320282d8f6f261fc4c6f56c18dc0 } from '@/components/admin/WebhookSecretField'
 import { default as default_11bfb412cb2a6ba02d6c9b603de14a0d } from '@/components/admin/WebhookDeliveryRetryButton'
 import { default as default_6d1e3192fb13860a01ed82132ac4bf24 } from '@/components/admin/CloudImportCard'
+import { MonacoLocalProvider as MonacoLocalProvider_5bb7f93d97908ebccd7a01d9b67ad0c1 } from '@/components/admin/MonacoLocalProvider'
 import { default as default_5942ad61d31a35e0b477445ac2da020b } from '@/components/admin/CustomLogin'
 import { default as default_0f279ed84061a9870bc9f5e6bb867900 } from '@/components/admin/CloudImportView'
 import { CollectionCards as CollectionCards_f9c02e79a4aed9a3924487c0cd4cafb1 } from '@payloadcms/next/rsc'
@@ -23,6 +24,7 @@ export const importMap = {
   "@/components/admin/WebhookSecretField#default": default_f62d320282d8f6f261fc4c6f56c18dc0,
   "@/components/admin/WebhookDeliveryRetryButton#default": default_11bfb412cb2a6ba02d6c9b603de14a0d,
   "@/components/admin/CloudImportCard#default": default_6d1e3192fb13860a01ed82132ac4bf24,
+  "@/components/admin/MonacoLocalProvider#MonacoLocalProvider": MonacoLocalProvider_5bb7f93d97908ebccd7a01d9b67ad0c1,
   "@/components/admin/CustomLogin#default": default_5942ad61d31a35e0b477445ac2da020b,
   "@/components/admin/CloudImportView#default": default_0f279ed84061a9870bc9f5e6bb867900,
   "@payloadcms/next/rsc#CollectionCards": CollectionCards_f9c02e79a4aed9a3924487c0cd4cafb1,

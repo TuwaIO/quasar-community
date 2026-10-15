@@ -1,3 +1,4 @@
+import { INITIAL_QUOTA_BALANCE } from '@tuwaio/shared/billing';
 import { createId } from '@tuwaio/shared/cuid';
 import { encrypt } from '@tuwaio/shared/encryption';
 import type { CollectionConfig } from 'payload';
@@ -102,7 +103,7 @@ export const Users: CollectionConfig = {
                 name: 'Personal Workspace',
                 slug: `personal-${doc.id}`,
                 createdBy: doc.id,
-                quotaBalance: 100,
+                quotaBalance: INITIAL_QUOTA_BALANCE,
                 rpsLimit: 5,
                 rpsPaidLimit: 5,
                 quotaUsed: 0,

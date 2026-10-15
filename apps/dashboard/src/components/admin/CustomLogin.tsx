@@ -178,7 +178,7 @@ export default function CustomLogin() {
         <div className="mx-auto max-w-5xl 2xl:max-w-6xl px-4 sm:px-6 h-14 flex items-center justify-between">
           <a href="https://example.com/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2">
             <Image
-              src="https://cdn.jsdelivr.net/gh/TuwaIO/workflows@main/preview/logo_v2.svg"
+              src="/logo.svg"
               alt="TUWA"
               width={126}
               height={40}

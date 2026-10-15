@@ -7,6 +7,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Counter, Gauge } from 'prom-client';
 
+import { isPublicRpcFallbackEnabled } from '../../common/provider-policy';
 import { getAlchemyKey } from '../../constants';
 import * as schema from '../../database/schema/index';
 import { alchemyNetworkMap } from '../../lib/generated/alchemyNetworkMap';
@@ -85,13 +86,15 @@ export async function processSolanaTx(
     sources.push('System Alchemy');
   }
 
-  // E. Public Fallback
-  if (cluster === 'mainnet') {
-    rpcUrls.push('https://api.mainnet-beta.solana.com');
-    sources.push('Public Fallback');
-  } else if (cluster === 'devnet') {
-    rpcUrls.push('https://api.devnet.solana.com');
-    sources.push('Public Fallback');
+  // E. Public Fallback, opt-in (common/provider-policy.ts)
+  if (isPublicRpcFallbackEnabled()) {
+    if (cluster === 'mainnet') {
+      rpcUrls.push('https://api.mainnet-beta.solana.com');
+      sources.push('Public Fallback');
+    } else if (cluster === 'devnet') {
+      rpcUrls.push('https://api.devnet.solana.com');
+      sources.push('Public Fallback');
+    }
   }
 
   if (rpcUrls.length === 0) {
@@ -111,10 +114,15 @@ export async function processSolanaTx(
     return;
   }
 
+  // The record keeps numeric text; the fetcher compares block heights as numbers
+  const lastValidBlockHeight = tx.lastValidBlockHeight != null ? Number(tx.lastValidBlockHeight) : undefined;
+  let confirmedRecorded = tx.confirmationStatus === 'confirmed' || tx.confirmationStatus === 'finalized';
+
   initializePollingTracker({
     tx: {
       ...tx,
       rpcUrl,
+      lastValidBlockHeight,
     } as SolanaTransaction,
     fetcher: solanaFetcher,
     removeTxFromPool: (txKey) => {
@@ -144,15 +152,22 @@ export async function processSolanaTx(
           recentBlockhash: response.recentBlockhash,
           confirmations: 'MAX',
           slot: response.slot,
+          confirmationStatus: 'finalized',
         },
         true,
       );
       await onTerminalState(TransactionStatus.Success);
     },
     onIntervalTick: (response) => {
-      // Intermediate polling data (slots/confirmations) are no longer written to Postgres to save IOPS.
-      // These fields will be captured in the final onSuccess/onFailure state.
+      // Intermediate polling data (slots/confirmations) are not written to Postgres to save IOPS, except once: when a
+      // supermajority voted on the transaction (`confirmed`), which UIs show before it is finalized
       console.debug(`[SOLANA TRACKER] Tick for ${tx.txKey}: slot=${response.slot}, conf=${response.confirmations}`);
+      if (response.confirmationStatus === 'confirmed' && !confirmedRecorded) {
+        confirmedRecorded = true;
+        updateDbTx(tx.txKey, { confirmationStatus: 'confirmed', slot: response.slot }).catch((err) =>
+          console.error('[SOLANA TRACKER] Could not record the commitment of %s:', tx.txKey, err),
+        );
+      }
     },
     onFailure: async (response) => {
       console.error(`[SOLANA TRACKER] FAILED: ${tx.txKey}`);
@@ -162,7 +177,15 @@ export async function processSolanaTx(
         status: TransactionStatus.Failed,
       });
       errorCounter.inc({ ecosystem: 'Solana', chainId: String(chainId) });
-      const err = response?.err ?? new Error('Transaction tracking timed out or the transaction was not found.');
+      // An on-chain error fails at once (from `confirmed`); an unknown signature past its last valid block height
+      // expired; anything else timed out
+      const err =
+        response?.err ??
+        new Error(
+          response?.expired
+            ? 'The transaction expired: its blockhash expired before it was processed, so it can no longer land.'
+            : 'Transaction tracking timed out or the transaction was not found.',
+        );
 
       const errString = String(err).toLowerCase();
       if (errString.includes('429') || errString.includes('too many requests')) {

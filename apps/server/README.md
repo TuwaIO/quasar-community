@@ -16,7 +16,8 @@ The NestJS server (`quasar-nest`) is the stateless, low-latency processing workh
 2. **Two-Phase Tracking Pipeline**:
    - **Phase 1: Fast (`tracking-fast`)**: Ingests the transaction immediately, checking mempool and block inclusion, and triggers the initial `transaction.pending` or `transaction.confirmed` webhook.
    - **Phase 2: Lazy (`tracking-lazy`)**: Automatically enqueued with a 10-second delay to verify confirmation depth, handle speed-up/cancellation replacements, and verify finality against chain-specific thresholds.
-   - **Smart Account & Relayer Coverage**: Natively tracks standard EVM accounts, Solana transactions, Safe multisigs, Gelato relayers, and ERC-4337 Smart Accounts (UserOperations, paymasters, and bundlers) via Pimlico.
+   - **Smart Account & Relayer Coverage**: Natively tracks standard EVM accounts, Solana transactions, Safe multisigs, Gelato relayers, ERC-4337 Smart Accounts (UserOperations, paymasters, and bundlers) via Pimlico, and EIP-5792 batches of calls (by the hash of their transaction, which the app sends to `POST /v1/engine/pulsar/sync/:txKey/hash`).
+   - **Solana Failures and Expiry**: A Solana transaction with an on-chain error fails as soon as it is confirmed; a signature that never lands fails once the chain passes its `lastValidBlockHeight`.
 3. **Partition Manager (`PartitionManagerService`)**: Automatically provisions monthly PostgreSQL tables (`transactions_yYYYY_mMM`, `webhook_deliveries_yYYYY_mMM`) to maintain indexed performance under high transaction volumes.
 4. **Outbound Webhook Worker**: Delivers event notifications to configured target URLs with DNS-level SSRF protection, strict 10-second tarpit timeouts, and HMAC-SHA256 signatures.
 
@@ -37,7 +38,7 @@ apps/server/
 │   │   └── generated/
 │   │       └── alchemyNetworkMap.ts   # Chain ID → Alchemy network slug (generated, see §4)
 │   ├── tracking/
-│   │   ├── trackers/                  # Multi-chain trackers (EVM, Solana, Safe, Gelato, Pimlico)
+│   │   ├── trackers/                  # Multi-chain trackers (EVM, Solana, Safe, Gelato, Pimlico, EIP-5792)
 │   │   ├── tracking.service.ts        # Ingestion logic
 │   │   ├── router.service.ts          # Network confirmation thresholds
 │   │   └── webhook-dispatcher.service.ts # SSRF-safe outbound dispatcher

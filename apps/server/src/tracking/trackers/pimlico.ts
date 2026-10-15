@@ -13,6 +13,7 @@ import { Chain, fallback, Hex, http, isHex } from 'viem';
 import { getBlock } from 'viem/actions';
 import * as chains from 'viem/chains';
 
+import { areSystemProviderKeysEnabled, isPublicRpcFallbackEnabled } from '../../common/provider-policy';
 import { getAlchemyKey } from '../../constants';
 import * as schema from '../../database/schema/index';
 import { alchemyNetworkMap } from '../../lib/generated/alchemyNetworkMap';
@@ -83,7 +84,10 @@ export async function processPimlicoTx(
   // 3. Resolve Pimlico credentials
   const evmTx = tx as unknown as EvmTransaction;
   const pimlicoApiKey =
-    evmTx.pimlicoApiKey || (app?.pimlicoApiKey ? decrypt(app.pimlicoApiKey) : '') || process.env.PIMLICO_API_KEY || '';
+    evmTx.pimlicoApiKey ||
+    (app?.pimlicoApiKey ? decrypt(app.pimlicoApiKey) : '') ||
+    (areSystemProviderKeysEnabled() ? process.env.PIMLICO_API_KEY : '') ||
+    '';
 
   // A bundler URL from the sync request body replaces the Pimlico endpoint, so it passes the same
   // outbound check as an App RPC override. A rejected one falls back to Pimlico.
@@ -91,6 +95,12 @@ export async function processPimlicoTx(
     evmTx.bundlerUrl && (await isUsableRpcUrl(evmTx.bundlerUrl, '[PIMLICO TRACKER]', 'Client Bundler'))
       ? evmTx.bundlerUrl
       : undefined;
+
+  // Without a key or a bundler URL, createPimlicoRpcUrl falls back to Pimlico's public endpoint:
+  // the app has not chosen Pimlico, so its data must not go there.
+  if (!pimlicoApiKey && !clientBundlerUrl) {
+    throw new Error(`[PIMLICO TRACKER] No Pimlico API key or bundler URL for app ${appId}.`);
+  }
 
   const bundlerUrl = createPimlicoRpcUrl({
     chainId,
@@ -143,8 +153,8 @@ export async function processPimlicoTx(
     sources.push('System Alchemy');
   }
 
-  // E. Public RPC Fallback
-  if (viemChain.rpcUrls.default.http[0]) {
+  // E. Public RPC Fallback, opt-in (common/provider-policy.ts)
+  if (isPublicRpcFallbackEnabled() && viemChain.rpcUrls.default.http[0]) {
     rpcUrls.push(viemChain.rpcUrls.default.http[0]);
     sources.push('Public Fallback');
   }

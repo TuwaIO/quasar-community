@@ -4,6 +4,7 @@ import { getPayload, type PayloadRequest } from 'payload';
 
 import { checkAmlWithCache } from '@/lib/aml.service';
 import { withRateLimit } from '@/lib/apiWrapper';
+import { areQuotaPurchasesEnabled } from '@/lib/quotaPurchases';
 
 export const runtime = 'nodejs';
 
@@ -19,6 +20,11 @@ export const POST = withRateLimit(async (req: Request) => {
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // The paying wallet is screened only at the Quota checkout, which is closed while purchases are paused
+    if (!areQuotaPurchasesEnabled()) {
+      return NextResponse.json({ error: 'Quota purchases are paused' }, { status: 403 });
     }
 
     const body = (await req.json()) as AmlRequest;

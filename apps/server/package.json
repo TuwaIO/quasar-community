@@ -1,6 +1,6 @@
 {
   "name": "@tuwaio/quasar-nest",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": false,
   "publishConfig": {
     "access": "public"
@@ -34,13 +34,13 @@
     "@paralleldrive/cuid2": "^3.3.0",
     "@sentry/nestjs": "^11.4.0",
     "@sentry/profiling-node": "^11.4.0",
-    "@tuwaio/orbit-core": "^0.4.0",
-    "@tuwaio/orbit-evm": "^0.3.2",
-    "@tuwaio/orbit-solana": "^0.4.0",
-    "@tuwaio/pulsar-core": "^0.9.0",
-    "@tuwaio/pulsar-evm": "^0.8.0",
-    "@tuwaio/pulsar-solana": "^0.9.0",
-    "@tuwaio/quasar-sdk": "^0.3.0",
+    "@tuwaio/orbit-core": "^0.5.1",
+    "@tuwaio/orbit-evm": "^0.3.4",
+    "@tuwaio/orbit-solana": "^0.5.0",
+    "@tuwaio/pulsar-core": "^0.10.0",
+    "@tuwaio/pulsar-evm": "^0.9.0",
+    "@tuwaio/pulsar-solana": "^0.10.0",
+    "@tuwaio/quasar-sdk": "^0.6.0",
     "@tuwaio/shared": "workspace:*",
     "@wagmi/core": "^3.6.5",
     "@willsoto/nestjs-prometheus": "^6.1.1",

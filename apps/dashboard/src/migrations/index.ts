@@ -3,6 +3,7 @@ import * as migration_20260925_080001_schema_integrity from './20260925_080001_s
 import * as migration_20261002_220058_payload_3_90 from './20261002_220058_payload_3_90';
 import * as migration_20261003_071000_solana_caip2_chain_ids from './20261003_071000_solana_caip2_chain_ids';
 import * as migration_20261003_212609_webhook_deliveries_cascade from './20261003_212609_webhook_deliveries_cascade';
+import * as migration_20261014_130000_policies from './20261014_130000_policies';
 
 export const migrations = [
   {
@@ -29,5 +30,10 @@ export const migrations = [
     up: migration_20261003_212609_webhook_deliveries_cascade.up,
     down: migration_20261003_212609_webhook_deliveries_cascade.down,
     name: '20261003_212609_webhook_deliveries_cascade'
+  },
+  {
+    up: migration_20261014_130000_policies.up,
+    down: migration_20261014_130000_policies.down,
+    name: '20261014_130000_policies',
   },
 ];

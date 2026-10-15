@@ -173,3 +173,6 @@ infra/.env
 
 # Sentry Config File
 .env.sentry-build-plugin
+
+# Monaco of the Payload code editor, copied by apps/dashboard/scripts/copy-monaco.mjs before dev and build
+apps/dashboard/public/monaco/

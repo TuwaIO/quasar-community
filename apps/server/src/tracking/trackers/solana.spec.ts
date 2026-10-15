@@ -75,6 +75,9 @@ describe('processSolanaTx RPC selection', () => {
     vi.stubEnv('NODE_ENV', 'test');
     vi.stubEnv('ALLOW_INTERNAL_WEBHOOKS', 'false');
     vi.stubEnv('ALCHEMY_API_KEY_FALLBACK', '');
+    // The system Alchemy key and the public RPC are opt-in (Community Edition); the block below covers the default
+    vi.stubEnv('SYSTEM_PROVIDER_KEYS_ENABLED', 'true');
+    vi.stubEnv('PUBLIC_RPC_FALLBACK_ENABLED', 'true');
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     dnsAnswers({
@@ -209,5 +212,89 @@ describe('processSolanaTx RPC selection', () => {
       expect(await trackedRpcUrl({ id: 'app-1', ...fields })).toBe(MAINNET_PUBLIC);
       expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Skipping App QuickNode RPC'));
     });
+  });
+
+  describe('tracking details (Pulsar 0.10)', () => {
+    const run = async (txExtra: Record<string, unknown> = {}) => {
+      const updateDbTx = vi.fn().mockResolvedValue(undefined);
+      const onTerminal = vi.fn();
+      await processSolanaTx(
+        { txKey: '5VERsig', chainId: 'solana:mainnet', appId: 'app-1', ownerId: 'org-1', ...txExtra } as any,
+        onTerminal,
+        updateDbTx,
+        makeDb({ id: 'app-1' }) as any,
+        counter(),
+        counter(),
+        counter(),
+      );
+      return { args: mocks.initializePollingTracker.mock.calls.at(-1)![0], updateDbTx, onTerminal };
+    };
+
+    it('hands the fetcher the last valid block height as a number: the record stores it as numeric text', async () => {
+      const { args } = await run({ lastValidBlockHeight: '345678901' });
+      expect(args.tx.lastValidBlockHeight).toBe(345_678_901);
+      const without = (await run()).args;
+      expect(without.tx.lastValidBlockHeight).toBeUndefined();
+    });
+
+    it('fails an expired transaction with an error that says its blockhash expired', async () => {
+      const { args, updateDbTx, onTerminal } = await run({ lastValidBlockHeight: '1' });
+      await args.onFailure({ slot: 0, confirmations: null, err: null, confirmationStatus: null, expired: true });
+      const [, fields, terminal] = updateDbTx.mock.calls[0];
+      expect(terminal).toBe(true);
+      expect(fields).toMatchObject({ status: 'Failed', pending: false, isError: true });
+      expect(fields.error.message).toMatch(/blockhash expired/i);
+      expect(onTerminal).toHaveBeenCalledWith('Failed');
+    });
+
+    it('records the commitment once it is confirmed, and finalized when it succeeds', async () => {
+      const { args, updateDbTx } = await run();
+      args.onIntervalTick({ slot: 9, confirmations: 1, err: null, confirmationStatus: 'processed' });
+      args.onIntervalTick({ slot: 9, confirmations: 2, err: null, confirmationStatus: 'confirmed' });
+      args.onIntervalTick({ slot: 9, confirmations: 3, err: null, confirmationStatus: 'confirmed' });
+      await Promise.resolve();
+      expect(updateDbTx).toHaveBeenCalledTimes(1);
+      expect(updateDbTx).toHaveBeenCalledWith('5VERsig', { confirmationStatus: 'confirmed', slot: 9 });
+
+      await args.onSuccess({ slot: 9, confirmations: null, err: null, confirmationStatus: 'finalized', fee: 5000 });
+      expect(updateDbTx).toHaveBeenLastCalledWith(
+        '5VERsig',
+        expect.objectContaining({ status: 'Success', confirmationStatus: 'finalized' }),
+        true,
+      );
+    });
+  });
+});
+
+describe("processSolanaTx with only the app's own RPC (the provider policy off, the default)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('ALLOW_INTERNAL_WEBHOOKS', 'false');
+    vi.stubEnv('ALCHEMY_API_KEY_FALLBACK', '');
+    vi.stubEnv('PUBLIC_RPC_FALLBACK_ENABLED', '');
+    vi.stubEnv('SYSTEM_PROVIDER_KEYS_ENABLED', '');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("uses the app's own Alchemy key, not the system key", async () => {
+    vi.stubEnv('ALCHEMY_API_KEY_FALLBACK', 'system-key');
+    expect(await trackedRpcUrl({ id: 'app-1', alchemyApiKey: 'enc:app-key' })).toBe(
+      'https://solana-mainnet.g.alchemy.com/v2/app-key',
+    );
+  });
+
+  it('fails rather than ask a public RPC when nothing else can read the cluster', async () => {
+    const tx: any = { txKey: '5VERsig', chainId: 'solana:mainnet', appId: 'app-1', ownerId: 'org-1' };
+    await expect(
+      processSolanaTx(tx, vi.fn(), vi.fn(), makeDb(undefined) as any, counter(), counter(), counter()),
+    ).rejects.toThrow();
+    expect(mocks.initializePollingTracker).not.toHaveBeenCalled();
   });
 });

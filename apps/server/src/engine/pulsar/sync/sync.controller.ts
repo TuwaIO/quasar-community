@@ -1,5 +1,19 @@
 import { InjectQueue } from '@nestjs/bullmq';
-import { BadRequestException, Body, Controller, Inject, Logger, Param, Post, Req, Res } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  ConflictException,
+  Controller,
+  HttpCode,
+  Inject,
+  Logger,
+  NotFoundException,
+  Param,
+  Post,
+  Req,
+  Res,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { OrbitAdapter, TuwaErrorState } from '@tuwaio/orbit-core';
 import {
   BaseTransaction,
@@ -15,17 +29,21 @@ import {
 import { CHAIN_FINALITY_CONFIRMATIONS, DEFAULT_FINALITY_CONFIRMATIONS } from '@tuwaio/shared/constants';
 import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import { Queue } from 'bullmq';
-import { and, eq, or } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import Redis from 'ioredis';
 import { Counter } from 'prom-client';
 import { z } from 'zod';
 
+import { RequiresDataProcessing } from '../../../common/data-processing';
+import { isUniqueViolation } from '../../../common/db-errors';
+import { isAmlScreeningEnabled } from '../../../common/provider-policy';
 import { PULSAR_TX_COUNT_METRIC } from '../../../constants';
 import { DRIZZLE } from '../../../database/database.constants';
 import * as schema from '../../../database/schema/index';
 import { solanaCaip2ChainId } from '../../../lib/solana-chain';
 import { REDIS } from '../../../redis/redis.constants';
+import { ProviderAvailabilityService } from '../../../tracking/provider-availability';
 import { TrackingService } from '../../../tracking/tracking.service';
 
 // ---------------------------------------------------------------------------
@@ -67,6 +85,7 @@ const TransactionTrackerSchema: z.ZodType<TransactionTracker> = z.enum([
   TransactionTracker.Gelato,
   TransactionTracker.Solana,
   TransactionTracker.ERC4337,
+  TransactionTracker.EIP5792,
 ]) as unknown as z.ZodType<TransactionTracker>;
 
 const TransactionStatusSchema: z.ZodType<TransactionStatus> = z.enum([
@@ -141,6 +160,8 @@ const SolanaTransactionSchema = BaseTransactionSchema.extend({
   instructions: z.array(z.unknown()).optional(),
   recentBlockhash: z.string().optional(),
   slot: z.number().optional(),
+  confirmationStatus: z.enum(['processed', 'confirmed', 'finalized']).optional(),
+  lastValidBlockHeight: z.number().int().nonnegative().optional(),
 });
 
 // PHANTOM TYPE CHECK: Enforces 1:1 alignment with pulsar-core SolanaTransaction
@@ -161,16 +182,34 @@ export const _checkStarknetTx: z.ZodType<StarknetTransaction> =
   StarknetTransactionSchema as unknown as z.ZodType<StarknetTransaction>;
 
 // --- Unified Transaction (discriminated union) ---
-const TransactionSchema = z.discriminatedUnion('adapter', [
-  EvmTransactionSchema,
-  SolanaTransactionSchema,
-  StarknetTransactionSchema,
-]);
+const TransactionSchema = z
+  .discriminatedUnion('adapter', [EvmTransactionSchema, SolanaTransactionSchema, StarknetTransactionSchema])
+  // A batch of calls (`wallet_sendCalls`) is an EVM wallet feature
+  .refine((tx) => tx.tracker !== TransactionTracker.EIP5792 || tx.adapter === OrbitAdapter.EVM, {
+    path: ['tracker'],
+    message: 'EIP-5792 batches are EVM transactions',
+  });
+
+/** `POST /v1/engine/pulsar/sync/:txKey/hash`: the transaction that executed an EIP-5792 batch. */
+const BatchHashSchema = z.strictObject({
+  hash: z.string().regex(/^0x[a-fA-F0-9]{64}$/, { message: 'A transaction hash: 0x and 64 hex digits' }),
+});
+
+/** The metric label of a tracker. */
+const ECOSYSTEM_OF: Record<string, string> = {
+  [TransactionTracker.Solana]: 'Solana',
+  [TransactionTracker.Safe]: 'Safe',
+  [TransactionTracker.Gelato]: 'Gelato',
+  [TransactionTracker.ERC4337]: 'ERC4337',
+  [TransactionTracker.EIP5792]: 'EIP5792',
+};
 
 // ---------------------------------------------------------------------------
 // POST /v1/engine/pulsar/sync  —  Create Transaction
 // ---------------------------------------------------------------------------
 
+// Every route takes the data of the organization's app users: refused until the organization can send it
+@RequiresDataProcessing()
 @Controller('v1/engine/pulsar/sync')
 export class SyncController {
   constructor(
@@ -180,6 +219,7 @@ export class SyncController {
     @InjectQueue('{aml-screening}') private readonly amlQueue: Queue,
     @InjectMetric(PULSAR_TX_COUNT_METRIC) private readonly txCounter: Counter<string>,
     private readonly trackingService: TrackingService,
+    private readonly providerAvailability: ProviderAvailabilityService,
   ) {}
 
   private readonly logger = new Logger(SyncController.name);
@@ -260,6 +300,81 @@ export class SyncController {
     );
 
     return { success: true, txKey, message: 'Transaction tracking retry scheduled.' };
+  }
+
+  /**
+   * POST /v1/engine/pulsar/sync/:txKey/hash
+   *
+   * The transaction that executed an EIP-5792 batch. A batch is synced by its batch ID, which only the wallet resolves
+   * (`wallet_getCallsStatus`); once the app learns the hash, Quasar tracks the batch on-chain by it, like an Ethereum
+   * transaction, and the record keeps the batch ID as its `txKey`. The same hash again is a duplicate; another hash,
+   * or a batch already final, is a conflict. A batch whose hash never arrives fails an hour after it was synced.
+   */
+  @Post(':txKey/hash')
+  @HttpCode(200)
+  async attachHash(@Param('txKey') txKey: string, @Body() body: unknown, @Req() req: { engineMeta: EngineMeta }) {
+    const meta = req.engineMeta;
+    const parsed = BatchHashSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'Bad Request: Invalid body',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+    const hash = parsed.data.hash.toLowerCase() as `0x${string}`;
+
+    const scope = and(
+      eq(schema.transactions.txKey, txKey),
+      eq(schema.transactions.ownerId, meta.ownerId),
+      eq(schema.transactions.appId, meta.id),
+    );
+    const [tx] = await this.db
+      .select({
+        tracker: schema.transactions.tracker,
+        pending: schema.transactions.pending,
+        hash: schema.transactions.hash,
+        appInvoiceId: schema.transactions.appInvoiceId,
+      })
+      .from(schema.transactions)
+      .where(scope)
+      .limit(1);
+    if (!tx) throw new NotFoundException({ error: 'Not Found: No such transaction' });
+    if (tx.tracker !== TransactionTracker.EIP5792) {
+      throw new BadRequestException({
+        error: 'Bad Request: Only EIP-5792 batches take a hash',
+        message: 'Other transactions are tracked by their txKey.',
+      });
+    }
+    if (tx.hash?.toLowerCase() === hash) return { success: true, txKey, hash, duplicate: true };
+    if (tx.hash) throw new ConflictException({ error: 'Conflict: The batch has another hash' });
+    if (!tx.pending) throw new ConflictException({ error: 'Conflict: The batch is already final' });
+
+    // A Payments batch pays the invoice its transaction settles
+    let appInvoiceId = tx.appInvoiceId;
+    if (!appInvoiceId && meta.appKind === 'payments') {
+      const [invoice] = await this.db
+        .select({ id: schema.appInvoices.id })
+        .from(schema.appInvoices)
+        .where(and(eq(schema.appInvoices.appId, meta.id), eq(schema.appInvoices.txHash, hash)))
+        .limit(1);
+      appInvoiceId = invoice?.id ?? null;
+    }
+
+    const updated = await this.db
+      .update(schema.transactions)
+      .set({ hash, appInvoiceId, updatedAt: new Date().toISOString() })
+      .where(and(scope, isNull(schema.transactions.hash), eq(schema.transactions.pending, true)))
+      .returning({ txKey: schema.transactions.txKey });
+    // Another request attached a hash first, or the batch finished meanwhile
+    if (updated.length === 0) throw new ConflictException({ error: 'Conflict: The batch changed; read it again' });
+
+    await this.fastQueue.add(
+      'process-tx',
+      { appId: meta.id, ownerId: meta.ownerId, txKey },
+      // Its own job: a recovery job of the sweeper may be queued under the plain ID
+      { jobId: `${meta.id}-${txKey}-hash`, removeOnComplete: true },
+    );
+    return { success: true, txKey, hash };
   }
 
   @Post()
@@ -386,7 +501,22 @@ export class SyncController {
           ? solanaCaip2ChainId(sanitized.chainId.toString())
           : sanitized.chainId.toString();
 
-      const amlEnabled = meta.appKind === 'payments' && meta.paymentSettings?.amlEnabled === true;
+      // Refuse a transaction the app has no provider to track: it would otherwise stay pending
+      const evmFields = sanitized as { pimlicoApiKey?: string | null; bundlerUrl?: string | null };
+      const missing = await this.providerAvailability.check(meta.id, {
+        tracker: String(sanitized.tracker),
+        adapter: String(sanitized.adapter),
+        chainId,
+        pimlicoApiKey: evmFields.pimlicoApiKey,
+        bundlerUrl: evmFields.bundlerUrl,
+      });
+      if (missing) {
+        // `error` carries the explanation: @tuwaio/quasar-sdk puts it in the message of QuasarSDKError
+        throw new UnprocessableEntityException({ error: `Unprocessable Entity: ${missing}`, message: missing });
+      }
+
+      const amlEnabled =
+        isAmlScreeningEnabled() && meta.appKind === 'payments' && meta.paymentSettings?.amlEnabled === true;
       const initialAmlStatus = amlEnabled ? 'pending' : 'not_applicable';
 
       try {
@@ -435,6 +565,11 @@ export class SyncController {
           ...('slot' in sanitized && { slot: sanitized.slot != null ? String(sanitized.slot) : null }),
           ...('recentBlockhash' in sanitized && { recentBlockhash: sanitized.recentBlockhash ?? null }),
           ...('instructions' in sanitized && { instructions: sanitized.instructions ?? null }),
+          ...('confirmationStatus' in sanitized && { confirmationStatus: sanitized.confirmationStatus ?? null }),
+          ...('lastValidBlockHeight' in sanitized && {
+            lastValidBlockHeight:
+              sanitized.lastValidBlockHeight != null ? String(sanitized.lastValidBlockHeight) : null,
+          }),
           // Starknet fields
           ...('actualFee' in sanitized && { actualFee: sanitized.actualFee ?? null }),
           ...('contractAddress' in sanitized && { contractAddress: sanitized.contractAddress ?? null }),
@@ -445,7 +580,7 @@ export class SyncController {
           amlProviderData: null,
         });
       } catch (insertErr: any) {
-        if (insertErr?.code === '23505') {
+        if (isUniqueViolation(insertErr)) {
           this.logger.warn(
             `[Sync] Unique violation caught on insert for txKey=${data.txKey}. Retrying fetch to return duplicate.`,
           );
@@ -470,16 +605,7 @@ export class SyncController {
       }
 
       // Map tracker enum to standardized metric ecosystem label
-      let ecosystem = 'EVM';
-      if (sanitized.tracker === TransactionTracker.Solana) {
-        ecosystem = 'Solana';
-      } else if (sanitized.tracker === TransactionTracker.Safe) {
-        ecosystem = 'Safe';
-      } else if (sanitized.tracker === TransactionTracker.Gelato) {
-        ecosystem = 'Gelato';
-      } else if (sanitized.tracker === TransactionTracker.ERC4337) {
-        ecosystem = 'ERC4337';
-      }
+      const ecosystem = ECOSYSTEM_OF[sanitized.tracker] ?? 'EVM';
 
       // Increment transaction counter
       this.txCounter.inc({

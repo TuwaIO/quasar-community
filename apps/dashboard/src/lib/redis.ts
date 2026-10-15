@@ -258,6 +258,8 @@ export async function invalidateOrganizationAppMetadata(payload: Payload, organi
     depth: 0,
     pagination: false,
     overrideAccess: true,
+    // `secretKeyHash` is a hidden field: without this the engine's entries of the secret keys were never deleted
+    showHiddenFields: true,
   });
   if (docs.length === 0) return;
 

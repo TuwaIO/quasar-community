@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { normalizeError } from '@tuwaio/orbit-core';
 import { SolanaTransaction, TransactionStatus, TransactionTracker } from '@tuwaio/pulsar-core';
 import { Transaction } from '@tuwaio/quasar-sdk';
 import { CHAIN_FINALITY_CONFIRMATIONS, DEFAULT_FINALITY_CONFIRMATIONS } from '@tuwaio/shared/constants';
@@ -10,6 +11,7 @@ import { Counter, Gauge } from 'prom-client';
 import { Chain, createPublicClient, decodeFunctionData, erc20Abi, fallback, Hex, http, parseEventLogs } from 'viem';
 import * as chains from 'viem/chains';
 
+import { isPublicRpcFallbackEnabled } from '../common/provider-policy';
 import {
   getAlchemyKey,
   PULSAR_ACTIVE_TRACKERS_METRIC,
@@ -21,6 +23,7 @@ import { DRIZZLE } from '../database/database.module';
 import * as schema from '../database/schema/index';
 import { alchemyNetworkMap } from '../lib/generated/alchemyNetworkMap';
 import { REDIS } from '../redis/redis.module';
+import { BATCH_HASH_TIMEOUT_MESSAGE, batchTracking } from './trackers/eip5792';
 import { processEvmTx } from './trackers/evm';
 import { processGelatoTx } from './trackers/gelato';
 import { processPimlicoTx } from './trackers/pimlico';
@@ -330,6 +333,41 @@ export class RouterService implements OnModuleInit {
               this.errorCounter,
             );
             break;
+          case TransactionTracker.EIP5792: {
+            const next = batchTracking({ hash: (tx as { hash?: string | null }).hash, createdAt: tx.createdAt });
+            if (next === 'wait') {
+              this.logger.log(`[ROUTER] Batch ${txKey} waits for the hash of its transaction`);
+              break;
+            }
+            this.activeTrackersGauge.inc();
+            trackerLaunched = true;
+            if (next === 'expire') {
+              await updateDbTx(
+                txKey,
+                {
+                  status: TransactionStatus.Failed,
+                  pending: false,
+                  isError: true,
+                  error: normalizeError(new Error(BATCH_HASH_TIMEOUT_MESSAGE)),
+                  finishedTimestamp: Math.floor(Date.now() / 1000),
+                },
+                true,
+              );
+              await handleTerminalState(TransactionStatus.Failed);
+              break;
+            }
+            await processEvmTx(
+              trackerTx,
+              handleTerminalState,
+              updateDbTx,
+              this.db,
+              this.redis,
+              this.lagGauge,
+              this.txCounter,
+              this.errorCounter,
+            );
+            break;
+          }
           default:
             this.logger.warn(`[ROUTER] Unknown tracker type: ${tx.tracker} for tx ${txKey}`);
         }
@@ -349,7 +387,9 @@ export class RouterService implements OnModuleInit {
                     ? 'Gelato'
                     : tx.tracker === TransactionTracker.ERC4337
                       ? 'ERC4337'
-                      : 'Unknown',
+                      : tx.tracker === TransactionTracker.EIP5792
+                        ? 'EIP5792'
+                        : 'Unknown',
           chainId: String(tx.chainId || 'unknown'),
           appId: tx.appId || 'unknown',
         });
@@ -374,7 +414,7 @@ export class RouterService implements OnModuleInit {
     if (systemAlchemyKey && alchemyNetwork) {
       rpcUrls.push(`https://${alchemyNetwork}.g.alchemy.com/v2/${systemAlchemyKey}`);
     }
-    if (viemChain.rpcUrls.default.http[0]) {
+    if (isPublicRpcFallbackEnabled() && viemChain.rpcUrls.default.http[0]) {
       rpcUrls.push(viemChain.rpcUrls.default.http[0]);
     }
     if (rpcUrls.length === 0) {

@@ -11,6 +11,7 @@ import {
 } from '../constants';
 import { DatabaseModule } from '../database/database.module';
 import { AmlService } from './aml.service';
+import { ProviderAvailabilityService } from './provider-availability';
 import { RouterService } from './router.service';
 import { TrackingService } from './tracking.service';
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
@@ -26,6 +27,7 @@ import { WebhookDispatcherService } from './webhook-dispatcher.service';
     WebhookDispatcherService,
     RouterService,
     AmlService,
+    ProviderAvailabilityService,
     makeGaugeProvider({
       name: PULSAR_SYNC_LAG_METRIC,
       help: 'Lag between block timestamp and tracking time in seconds',
@@ -46,6 +48,13 @@ import { WebhookDispatcherService } from './webhook-dispatcher.service';
       help: 'Number of currently active transaction trackers',
     }),
   ],
-  exports: [TrackingService, WebhookDispatcherService, RouterService, AmlService, getToken(PULSAR_TX_COUNT_METRIC)],
+  exports: [
+    TrackingService,
+    WebhookDispatcherService,
+    RouterService,
+    AmlService,
+    ProviderAvailabilityService,
+    getToken(PULSAR_TX_COUNT_METRIC),
+  ],
 })
 export class TrackingModule {}

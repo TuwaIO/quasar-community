@@ -208,7 +208,7 @@ export interface Transaction {
   /**
    * Tracking System
    */
-  tracker: 'ethereum' | 'safe' | 'gelato' | 'solana' | 'erc4337';
+  tracker: 'ethereum' | 'safe' | 'gelato' | 'solana' | 'erc4337' | 'eip5792';
   status?: ('Failed' | 'Success' | 'Replaced') | null;
   /**
    * Engine sync status
@@ -303,6 +303,14 @@ export interface Transaction {
     | number
     | boolean
     | null;
+  /**
+   * Commitment reached: `confirmed` within a second, `finalized` when it succeeds.
+   */
+  confirmationStatus?: ('processed' | 'confirmed' | 'finalized') | null;
+  /**
+   * Past this block height an unknown signature can no longer land: the tracker fails it.
+   */
+  lastValidBlockHeight?: number | null;
   actualFee?:
     | {
         [k: string]: unknown;
@@ -351,6 +359,10 @@ export interface Organization {
    * If enabled, the RPS limit for this organization will never expire or reset.
    */
   rpsForever?: boolean | null;
+  /**
+   * Whether the apps of this organization may send transactions. Pending until the organization concludes the Data Processing Addendum, and the standard contractual clauses where they apply. Set "Own organization" only for organizations of the operator itself, which controls their data.
+   */
+  dataProcessing?: ('pending' | 'own') | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -963,6 +975,8 @@ export interface TransactionsSelect<T extends boolean = true> {
   slot?: T;
   recentBlockhash?: T;
   instructions?: T;
+  confirmationStatus?: T;
+  lastValidBlockHeight?: T;
   actualFee?: T;
   contractAddress?: T;
   updatedAt?: T;
@@ -1048,6 +1062,7 @@ export interface OrganizationsSelect<T extends boolean = true> {
   rpsExpiresAt?: T;
   quotaUsed?: T;
   rpsForever?: T;
+  dataProcessing?: T;
   updatedAt?: T;
   createdAt?: T;
 }

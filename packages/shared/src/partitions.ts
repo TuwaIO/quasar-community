@@ -53,3 +53,42 @@ export function monthlyPartitionsBetween(table: PartitionedTable, from: Date, to
 export function createPartitionSql(partition: MonthlyPartition): string {
   return `CREATE TABLE IF NOT EXISTS "${partition.name}" PARTITION OF "${partition.table}" FOR VALUES FROM ('${partition.from}') TO ('${partition.to}')`;
 }
+
+/** The `_y<YYYY>_m<MM>` suffix of {@link monthlyPartition}, with the year and month captured. */
+const MONTH_SUFFIX = /^_y(\d{4})_m(0[1-9]|1[0-2])$/;
+
+/** `<table>_y<YYYY>_m<MM>` of {@link monthlyPartition}: the first day of its month. */
+function partitionMonth(table: PartitionedTable, name: string): Date | undefined {
+  const match = name.startsWith(table) ? MONTH_SUFFIX.exec(name.slice(table.length)) : null;
+  return match ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1)) : undefined;
+}
+
+/**
+ * The monthly partitions of `table`, among `names`, whose rows have all reached the retention period: those whose first
+ * day is `keepMonths` months or more before `now`. No row is kept longer than `keepMonths` months, and the rows of a
+ * partition go together, so some go earlier. Names that are not monthly partitions of `table` are ignored.
+ */
+export function expiredMonthlyPartitions(
+  table: PartitionedTable,
+  names: readonly string[],
+  now: Date,
+  keepMonths: number,
+): string[] {
+  return names.filter((name) => {
+    const start = partitionMonth(table, name);
+    if (!start) return false;
+    const expiresAt = Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + keepMonths, 1);
+    return now.getTime() >= expiresAt;
+  });
+}
+
+/**
+ * Statements that detach a monthly partition from `table` and drop it. The name must be a monthly partition of the table,
+ * as {@link expiredMonthlyPartitions} returns, so no input reaches the SQL.
+ */
+export function dropPartitionSql(table: PartitionedTable, name: string): string[] {
+  if (!(PARTITIONED_TABLES as readonly string[]).includes(table) || !partitionMonth(table, name)) {
+    throw new Error(`${name} is not a monthly partition of ${table}`);
+  }
+  return [`ALTER TABLE "${table}" DETACH PARTITION "${name}"`, `DROP TABLE IF EXISTS "${name}"`];
+}

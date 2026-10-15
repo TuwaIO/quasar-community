@@ -23,6 +23,11 @@ const s3EndpointHostname = process.env.S3_ENDPOINT ? new URL(process.env.S3_ENDP
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  experimental: {
+    // CI builds the image on a fresh runner, so the Turbopack build cache is never read there: writing it took more
+    // than a minute and gigabytes of memory on the 7 GB runners. Local builds start from scratch too.
+    turbopackFileSystemCacheForBuild: false,
+  },
   images: {
     remotePatterns: [
       ...(s3EndpointHostname ? [{ protocol: 'https', hostname: s3EndpointHostname }] : []),
@@ -119,7 +124,7 @@ export default withSentryConfig(withPayload(nextConfig, { devBundleServerPackage
   widenClientFileUpload: true,
 
   // Route browser requests to Sentry through a Next.js rewrite to circumvent ad-blockers.
-  tunnelRoute: "/monitoring",
+  tunnelRoute: '/monitoring',
 
   sourcemaps: {
     // No auth token (local dev, Community Edition): no browser source maps are generated at all
@@ -141,4 +146,3 @@ export default withSentryConfig(withPayload(nextConfig, { devBundleServerPackage
     },
   },
 });
-

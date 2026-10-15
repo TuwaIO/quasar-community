@@ -64,7 +64,7 @@ of the edition rather than an uptime-backed service.
 
 - **High-Throughput Ingestion**: NestJS (Fastify) microservice capable of processing high-volume RPC tracking events (`POST /v1/engine/sync`).
 - **Deterministic Two-Phase Indexing**: BullMQ queue architecture with Phase 1 (Fast, real-time polling) and Phase 2 (Lazy, delayed consistency check for chain reorgs and RPC lag).
-- **Multi-Chain Tracker Support**: Native adapters for EVM (standard accounts and ERC-4337 Smart Accounts via Pimlico/Gelato) and Solana (signature confirmation via `@solana/kit` and `@tuwaio/orbit-solana`).
+- **Multi-Chain Tracker Support**: Native adapters for EVM (standard accounts, ERC-4337 Smart Accounts via Pimlico/Gelato, and EIP-5792 batches of calls tracked by the hash the app reports) and Solana (signature confirmation via `@solana/kit` and `@tuwaio/orbit-solana`, with early failure of on-chain errors and expiry past `lastValidBlockHeight`).
 - **Timeseries Partitioning**: Automatic monthly partitioning on PostgreSQL 16 for `transactions` and `webhook_deliveries` tables, preventing table bloat and ensuring sub-millisecond indexed lookups.
 - **SSRF-Protected Webhooks**: Webhook delivery worker with DNS resolution validation against private IP ranges, tarpit timeouts, and HMAC-SHA256 signature verification.
 - **Full Payload CMS Administration**: Self-hosted administrative back-office mounted at `/admin` for managing API keys, inspecting transaction logs, and configuring webhook delivery endpoints.
@@ -226,14 +226,14 @@ Quasar is developed with an open-core philosophy:
 | **High-Throughput Fastify Engine** | ✅ Included (`quasar-nest`) | ✅ Included |
 | **Timeseries PostgreSQL Partitioning** | ✅ Included | ✅ Included |
 | **BullMQ Distributed Workers** | ✅ Included | ✅ Included |
-| **ERC-4337 & Relayer Tracking (Pimlico, Gelato, Safe)** | ✅ Included (Self-Hosted Keys) | ✅ Included (Managed / Bundled) |
+| **ERC-4337, EIP-5792 & Relayer Tracking (Pimlico, Gelato, Safe)** | ✅ Included (Self-Hosted Keys) | ✅ With the app's own Pimlico and Gelato keys; Safe not tracked yet |
 | **Self-Hosted Infrastructure** | 100% Bare-Metal / Docker | Managed Cloud Infrastructure |
 | **License** | **Apache 2.0 (FOSS)** | Commercial Terms |
 | **Authentication Architecture** | **Native Payload Auth + TOTP 2FA** | **Multi-Tenant Auth, SIWX & Passkeys** |
-| **Web3 Wallet Sign-In (SIWX)** | ❌ Omitted (Single-Operator Model) | ✅ EVM & Solana Wallet Sign-In (CAIP-122) |
+| **Web3 Wallet Sign-In (SIWX)** | ❌ Omitted (Single-Operator Model) | ✅ EVM Wallet Sign-In (CAIP-122) |
 | **Passkeys / WebAuthn** | ❌ Omitted | ✅ Biometric FIDO2 Passkeys |
 | **Transactional Email Delivery** | ❌ Omitted (Zero External SMTP) | ✅ Customer Onboarding & Low-Quota Alerts |
-| **Multi-Tenant Metered Billing** | ❌ Omitted | ✅ Integrated On-Chain Billing |
+| **Multi-Tenant Quota Metering** | ❌ Omitted | ✅ Free public beta: 1,000 free quota units per organization |
 | **Customer-Facing SaaS Portal** | ❌ Omitted (Admin Only) | ✅ Multi-Tenant Developer Portal |
 
 ### Which release am I running?

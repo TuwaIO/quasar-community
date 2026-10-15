@@ -30,6 +30,7 @@ export const enum_transactions_tracker = pgEnum('enum_transactions_tracker', [
   'gelato',
   'solana',
   'erc4337',
+  'eip5792',
 ]);
 export const enum_transactions_status = pgEnum('enum_transactions_status', ['Failed', 'Success', 'Replaced']);
 export const enum_transactions_sync_status = pgEnum('enum_transactions_sync_status', ['synced', 'pending-sync']);
@@ -40,9 +41,15 @@ export const enum_transactions_aml_status = pgEnum('enum_transactions_aml_status
   'flagged',
   'failed',
 ]);
+export const enum_transactions_confirmation_status = pgEnum('enum_transactions_confirmation_status', [
+  'processed',
+  'confirmed',
+  'finalized',
+]);
 export const enum_apps_environment = pgEnum('enum_apps_environment', ['live', 'test']);
 export const enum_apps_kind = pgEnum('enum_apps_kind', ['basic', 'payments']);
 export const enum_quota_usage_ledger_status = pgEnum('enum_quota_usage_ledger_status', ['applied', 'manual-review']);
+export const enum_organizations_data_processing = pgEnum('enum_organizations_data_processing', ['pending', 'own']);
 export const enum_organization_members_role = pgEnum('enum_organization_members_role', ['owner', 'admin', 'member']);
 export const enum_webhook_endpoints_events = pgEnum('enum_webhook_endpoints_events', [
   '*',
@@ -189,6 +196,8 @@ export const transactions = pgTable(
     slot: numeric('slot', { mode: 'number' }),
     recentBlockhash: varchar('recent_blockhash'),
     instructions: jsonb('instructions'),
+    confirmationStatus: enum_transactions_confirmation_status('confirmation_status'),
+    lastValidBlockHeight: numeric('last_valid_block_height', { mode: 'number' }),
     actualFee: jsonb('actual_fee'),
     contractAddress: varchar('contract_address'),
     updatedAt: timestamp('updated_at', { mode: 'string', withTimezone: true, precision: 3 }).defaultNow().notNull(),
@@ -353,6 +362,7 @@ export const organizations = pgTable(
     rpsExpiresAt: timestamp('rps_expires_at', { mode: 'string', withTimezone: true, precision: 3 }),
     quotaUsed: numeric('quota_used', { mode: 'number' }).notNull().default(0),
     rpsForever: boolean('rps_forever').default(true),
+    dataProcessing: enum_organizations_data_processing('data_processing').default('pending'),
     updatedAt: timestamp('updated_at', { mode: 'string', withTimezone: true, precision: 3 }).defaultNow().notNull(),
     createdAt: timestamp('created_at', { mode: 'string', withTimezone: true, precision: 3 }).defaultNow().notNull(),
   },
@@ -1082,9 +1092,11 @@ type DatabaseSchema = {
   enum_transactions_status: typeof enum_transactions_status;
   enum_transactions_sync_status: typeof enum_transactions_sync_status;
   enum_transactions_aml_status: typeof enum_transactions_aml_status;
+  enum_transactions_confirmation_status: typeof enum_transactions_confirmation_status;
   enum_apps_environment: typeof enum_apps_environment;
   enum_apps_kind: typeof enum_apps_kind;
   enum_quota_usage_ledger_status: typeof enum_quota_usage_ledger_status;
+  enum_organizations_data_processing: typeof enum_organizations_data_processing;
   enum_organization_members_role: typeof enum_organization_members_role;
   enum_webhook_endpoints_events: typeof enum_webhook_endpoints_events;
   enum_outbox_events_status: typeof enum_outbox_events_status;

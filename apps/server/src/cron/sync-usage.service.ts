@@ -13,6 +13,16 @@ import { organizations } from '../database/schema';
 import * as schema from '../database/schema/index';
 import { REDIS, REDLOCK } from '../redis/redis.constants';
 
+/**
+ * Whether a database error is the foreign key of the usage ledger on its organization, that is, the organization row
+ * no longer exists (Postgres error 23503, possibly wrapped by Drizzle in `cause`).
+ */
+function isMissingOrganization(err: unknown): boolean {
+  const cause = (err as { cause?: unknown } | null)?.cause ?? err;
+  const { code, constraint } = (cause ?? {}) as { code?: string; constraint?: string };
+  return code === '23503' && !!constraint?.endsWith('_organization_id_organizations_id_fk');
+}
+
 @Injectable()
 export class SyncUsageService implements OnApplicationShutdown {
   private readonly logger = new Logger(SyncUsageService.name);
@@ -234,6 +244,24 @@ export class SyncUsageService implements OnApplicationShutdown {
               `[Cron] Quota batch ${batchId ?? 'unknown'} committed but Redis acknowledgement failed; leaving sync keys for rescue.`,
               err,
             );
+            return;
+          }
+
+          if (isMissingOrganization(err)) {
+            // The organization was deleted while its usage waited in Redis: there is nothing left to charge, and
+            // reclaiming would fail the same way on every run.
+            this.logger.warn(`[Cron] Org ${organizationId} no longer exists; dropping ${usage} unsynced usage units.`);
+            try {
+              await this.redis.del(
+                syncKey,
+                syncBatchKey,
+                `{${organizationId}}:usage`,
+                `{${organizationId}}:usage:batch`,
+                `{${organizationId}}:limit`,
+              );
+            } catch (redisErr) {
+              this.logger.error(`[Cron] Could not drop the usage keys of deleted Org ${organizationId}`, redisErr);
+            }
             return;
           }
 

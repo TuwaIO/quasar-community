@@ -102,6 +102,9 @@ describe('processEvmTx RPC selection', () => {
     vi.stubEnv('NODE_ENV', 'test');
     vi.stubEnv('ALLOW_INTERNAL_WEBHOOKS', 'false');
     vi.stubEnv('ALCHEMY_API_KEY_FALLBACK', '');
+    // The system Alchemy key and the public RPC are opt-in (Community Edition); the block below covers the default
+    vi.stubEnv('SYSTEM_PROVIDER_KEYS_ENABLED', 'true');
+    vi.stubEnv('PUBLIC_RPC_FALLBACK_ENABLED', 'true');
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     dnsAnswers({
@@ -254,5 +257,65 @@ describe('processEvmTx RPC selection', () => {
       expect(await run(app, [{ rpcUrl: `enc:${OVERRIDE}` }])).toEqual([OVERRIDE, PUBLIC_FALLBACK]);
       expect(await run(app, [{ rpcUrl: `enc:${OVERRIDE}` }])).toEqual([]);
     });
+  });
+
+  it('tracks an EIP-5792 batch by the hash of its transaction and writes to the batch record', async () => {
+    vi.resetModules();
+    const { processEvmTx } = await import('./evm');
+    const hash = `0x${'ab'.repeat(32)}`;
+    const updateDbTx = vi.fn();
+    mocks.evmTracker.mockImplementation(async (args: any) => {
+      await args.onFailure(new Error('reverted'));
+    });
+
+    await processEvmTx(
+      { txKey: 'batch-7', tracker: 'eip5792', hash, chainId: 1, appId: 'app-1', ownerId: 'org-1' } as any,
+      vi.fn(),
+      updateDbTx,
+      makeDb({ id: 'app-1' }) as any,
+      { set: vi.fn(), get: vi.fn(), del: vi.fn() } as any,
+      counter() as any,
+      counter() as any,
+      counter() as any,
+    );
+
+    const args = mocks.evmTracker.mock.calls[0][0];
+    expect(args.tx.txKey).toBe(hash);
+    expect(args.waitForTransactionReceiptParams.hash).toBe(hash);
+    expect(updateDbTx).toHaveBeenCalledWith('batch-7', expect.anything(), true);
+  });
+});
+
+describe("processEvmTx with only the app's own RPC (the provider policy off, the default)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('ALLOW_INTERNAL_WEBHOOKS', 'false');
+    vi.stubEnv('ALCHEMY_API_KEY_FALLBACK', '');
+    vi.stubEnv('PUBLIC_RPC_FALLBACK_ENABLED', '');
+    vi.stubEnv('SYSTEM_PROVIDER_KEYS_ENABLED', '');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("uses only the app's own Alchemy key, not the system key or the public RPC", async () => {
+    vi.stubEnv('ALCHEMY_API_KEY_FALLBACK', 'system-key');
+    expect(await trackedRpcUrls({ id: 'app-1', alchemyApiKey: 'enc:app-key' })).toEqual([
+      'https://eth-mainnet.g.alchemy.com/v2/app-key',
+    ]);
+  });
+
+  it('leaves the system Alchemy key out unless SYSTEM_PROVIDER_KEYS_ENABLED is true', async () => {
+    vi.stubEnv('ALCHEMY_API_KEY_FALLBACK', 'system-key');
+    await expect(trackedRpcUrls({ id: 'app-1' })).rejects.toThrow('No valid RPC URLs');
+  });
+
+  it('fails rather than ask a public RPC when nothing else can read the chain', async () => {
+    await expect(trackedRpcUrls({ id: 'app-1' })).rejects.toThrow('No valid RPC URLs');
   });
 });

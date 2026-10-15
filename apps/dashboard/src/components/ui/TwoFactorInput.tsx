@@ -1,6 +1,6 @@
 'use client';
 
-import { cn } from '@tuwaio/sdk/nova-core';
+import { cn } from '@tuwaio/sdk/nova-core/utils';
 import { motion } from 'framer-motion';
 import React, { useLayoutEffect, useRef } from 'react';
 

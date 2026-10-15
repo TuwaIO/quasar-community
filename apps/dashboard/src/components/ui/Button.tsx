@@ -1,6 +1,6 @@
 'use client';
 
-import { cn } from '@tuwaio/sdk/nova-core';
+import { cn } from '@tuwaio/sdk/nova-core/utils';
 import { type HTMLMotionProps, motion } from 'framer-motion';
 import React from 'react';
 

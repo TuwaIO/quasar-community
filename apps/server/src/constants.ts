@@ -1,5 +1,8 @@
+import { areSystemProviderKeysEnabled } from './common/provider-policy';
+
+/** The system Alchemy key, used only when the system provider keys are switched on (`common/provider-policy.ts`). */
 export function getAlchemyKey(): string {
-  return process.env.ALCHEMY_API_KEY_FALLBACK || '';
+  return areSystemProviderKeysEnabled() ? process.env.ALCHEMY_API_KEY_FALLBACK || '' : '';
 }
 
 // --- Tracking Service: Horizontal Scaling Constants ---

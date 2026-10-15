@@ -199,15 +199,15 @@ export async function proxy(request: NextRequest) {
 
   const cspDirectives = [
     "default-src 'self';",
-    `script-src 'self' 'unsafe-inline'${allowUnsafeEval ? " 'unsafe-eval'" : ''} https://static.cloudflareinsights.com https://cdn.jsdelivr.net blob:;`,
-    `connect-src 'self' https: wss: blob: https://*.sentry.io https://cloudflareinsights.com https://*.cloudflareinsights.com ${ENGINE_CONNECT_SOURCES} https://cdn.jsdelivr.net;`,
+    `script-src 'self' 'unsafe-inline'${allowUnsafeEval ? " 'unsafe-eval'" : ''} blob:;`,
+    `connect-src 'self' https: wss: blob: https://*.sentry.io ${ENGINE_CONNECT_SOURCES};`,
     "img-src 'self' data: blob: https:;",
-    "style-src 'self' 'unsafe-inline' https: https://cdn.jsdelivr.net;",
+    "style-src 'self' 'unsafe-inline' https:;",
     "font-src 'self' data: https:;",
     "frame-src 'self' https:;",
     "frame-ancestors 'self' https://app.safe.global https://*.safe.global;",
     "object-src 'none';",
-    "worker-src 'self' blob: https://cdn.jsdelivr.net;",
+    "worker-src 'self' blob:;",
     "base-uri 'self';",
     "form-action 'self';",
   ];

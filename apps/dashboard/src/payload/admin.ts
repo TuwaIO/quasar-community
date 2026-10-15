@@ -13,6 +13,8 @@ export const adminConfig: Config['admin'] = {
     baseDir: path.resolve(dirname, '..'),
   },
   components: {
+    // Monaco of the code editor from this site, not from jsDelivr (Cookie and Privacy policies)
+    providers: ['@/components/admin/MonacoLocalProvider#MonacoLocalProvider'],
     // Import of a Cloud export. Registered in both editions so they share one import map: the components render
     // only on a Community Edition node (constants/edition.ts)
     beforeDashboard: ['@/components/admin/CloudImportCard'],

@@ -9,6 +9,7 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Counter, Gauge } from 'prom-client';
 import { Hex } from 'viem';
 
+import { areSystemProviderKeysEnabled } from '../../common/provider-policy';
 import * as schema from '../../database/schema/index';
 
 type UpdateFn = (txKey: string, data: UpdatableTransactionFields, isTerminal?: boolean) => Promise<void>;
@@ -25,11 +26,15 @@ export async function processGelatoTx(
   const appId = tx.appId;
   const [app] = await db.select().from(schema.apps).where(eq(schema.apps.id, appId)).limit(1);
 
-  const GELATO_API_KEY = decrypt(app?.gelatoApiKey) || process.env.GELATO_API_KEY || '';
+  const GELATO_API_KEY =
+    decrypt(app?.gelatoApiKey) || (areSystemProviderKeysEnabled() ? process.env.GELATO_API_KEY : '') || '';
   console.log(`[GELATO TRACKER] Starting for ${tx.txKey}`);
   if (!tx.txKey) {
     console.error(`[GELATO TRACKER] Missing txKey for tracking.`);
     return;
+  }
+  if (!GELATO_API_KEY) {
+    throw new Error(`[GELATO TRACKER] No Gelato API key for app ${appId}.`);
   }
   const client = createGelatoClient({ apiKey: GELATO_API_KEY });
   const fetcher = gelatoFetcher(client);

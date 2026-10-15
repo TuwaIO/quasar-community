@@ -35,7 +35,7 @@ export const seedCommunity = async (payload: Payload): Promise<void> => {
 
   // `enforceLimits` is not optional here. Creating the admin above fires
   // `Users.afterChange`, which auto-creates a "Personal Workspace" on the SaaS
-  // free-tier defaults (quotaBalance 100, rpsLimit/rpsPaidLimit 5) before this
+  // free-tier defaults (quotaBalance 1000, rpsLimit/rpsPaidLimit 5) before this
   // line runs — so without it seedWorkspace finds that org, preserves it, and
   // the community limits below are silently never applied.
   const orgId = await seedWorkspace(payload, adminUser, {

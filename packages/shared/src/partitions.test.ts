@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { createPartitionSql, monthlyPartition, monthlyPartitionsBetween } from './partitions';
+import {
+  createPartitionSql,
+  dropPartitionSql,
+  expiredMonthlyPartitions,
+  monthlyPartition,
+  monthlyPartitionsBetween,
+} from './partitions';
 
 describe('monthly partitions', () => {
   it('names the UTC calendar month of a date and bounds it by the first days of that month and the next', () => {
@@ -42,5 +48,39 @@ describe('monthly partitions', () => {
 
   it('refuses a table that is not partitioned by month', () => {
     expect(() => monthlyPartition('users' as never, new Date())).toThrow('not partitioned by month');
+  });
+
+  it('expires a partition once the kept number of months has passed since its first day', () => {
+    const names = [
+      'webhook_deliveries_y2026_m06',
+      'webhook_deliveries_y2026_m07',
+      'webhook_deliveries_y2026_m08',
+      'webhook_deliveries_y2026_m10',
+    ];
+    // On 1 October no row of July is older than 3 months yet
+    expect(expiredMonthlyPartitions('webhook_deliveries', names, new Date('2026-09-30T23:59:59Z'), 3)).toEqual([
+      'webhook_deliveries_y2026_m06',
+    ]);
+    expect(expiredMonthlyPartitions('webhook_deliveries', names, new Date('2026-10-01T00:00:00Z'), 3)).toEqual([
+      'webhook_deliveries_y2026_m06',
+      'webhook_deliveries_y2026_m07',
+    ]);
+  });
+
+  it('ignores names that are not monthly partitions of the table', () => {
+    const names = ['webhook_deliveries_default', 'transactions_y2020_m01', 'webhook_deliveries_y2020_m1', 'other'];
+    expect(expiredMonthlyPartitions('webhook_deliveries', names, new Date('2026-10-14T00:00:00Z'), 3)).toEqual([]);
+  });
+
+  it('detaches a partition before dropping it', () => {
+    expect(dropPartitionSql('webhook_deliveries', 'webhook_deliveries_y2026_m06')).toEqual([
+      'ALTER TABLE "webhook_deliveries" DETACH PARTITION "webhook_deliveries_y2026_m06"',
+      'DROP TABLE IF EXISTS "webhook_deliveries_y2026_m06"',
+    ]);
+  });
+
+  it('refuses to drop anything but a monthly partition of the table', () => {
+    expect(() => dropPartitionSql('webhook_deliveries', 'webhook_deliveries; DROP TABLE users')).toThrow();
+    expect(() => dropPartitionSql('webhook_deliveries', 'transactions_y2026_m06')).toThrow();
   });
 });

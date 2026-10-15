@@ -1,5 +1,5 @@
 import { normalizeError } from '@tuwaio/orbit-core';
-import { TransactionStatus } from '@tuwaio/pulsar-core';
+import { EvmTransaction, TransactionStatus, TransactionTracker } from '@tuwaio/pulsar-core';
 import { evmTracker } from '@tuwaio/pulsar-evm';
 import { Transaction, UpdatableTransactionFields } from '@tuwaio/quasar-sdk';
 import { decrypt } from '@tuwaio/shared/encryption';
@@ -12,6 +12,7 @@ import { Chain, fallback, Hex, http } from 'viem';
 import { getBlock } from 'viem/actions';
 import * as chains from 'viem/chains';
 
+import { isPublicRpcFallbackEnabled } from '../../common/provider-policy';
 import { getAlchemyKey } from '../../constants';
 import * as schema from '../../database/schema/index';
 import { alchemyNetworkMap } from '../../lib/generated/alchemyNetworkMap';
@@ -113,8 +114,8 @@ export async function processEvmTx(
     sources.push('System Alchemy');
   }
 
-  // E. Public RPC Fallback (Viem default)
-  if (viemChain.rpcUrls.default.http[0]) {
+  // E. Public RPC Fallback (Viem default), opt-in (common/provider-policy.ts)
+  if (isPublicRpcFallbackEnabled() && viemChain.rpcUrls.default.http[0]) {
     rpcUrls.push(viemChain.rpcUrls.default.http[0]);
     sources.push('Public Fallback');
   }
@@ -147,18 +148,20 @@ export async function processEvmTx(
     setCachedConfig(cacheKey, config);
   }
   const redisKey = `tx_conf:${tx.txKey}`;
+  // An EIP-5792 batch keeps its batch ID as `txKey`: it is tracked by the transaction that executed it
+  const onChainHash = (tx.tracker === TransactionTracker.EIP5792 ? (tx as EvmTransaction).hash : tx.txKey) as Hex;
 
   let fetchedDetails: UpdatableTransactionFields = {};
 
   await evmTracker({
     tx: {
-      txKey: tx.txKey,
+      txKey: onChainHash,
       chainId,
       requiredConfirmations: tx.requiredConfirmations ? Number(tx.requiredConfirmations) : undefined,
     },
     config,
     waitForTransactionReceiptParams: {
-      hash: tx.txKey as Hex,
+      hash: onChainHash,
       retryCount: 36,
       timeout: 180_000, // 3 minutes hard ceiling
     },

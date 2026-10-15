@@ -53,6 +53,9 @@ describe('processPimlicoTx', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // These tests run with no Alchemy key, so the public RPC (opt-in, Community Edition) is stage 2
+    vi.stubEnv('PUBLIC_RPC_FALLBACK_ENABLED', 'true');
+    vi.stubEnv('SYSTEM_PROVIDER_KEYS_ENABLED', 'true');
 
     const mockQuery: any = {
       from: vi.fn().mockReturnThis(),
@@ -258,6 +261,8 @@ describe('processPimlicoTx outbound URL checks', () => {
     vi.stubEnv('NODE_ENV', 'test');
     vi.stubEnv('ALLOW_INTERNAL_WEBHOOKS', 'false');
     vi.stubEnv('ALCHEMY_API_KEY_FALLBACK', '');
+    vi.stubEnv('PUBLIC_RPC_FALLBACK_ENABLED', 'true');
+    vi.stubEnv('SYSTEM_PROVIDER_KEYS_ENABLED', 'true');
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -274,6 +279,60 @@ describe('processPimlicoTx outbound URL checks', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+  });
+
+  describe('Pimlico credentials and the public RPC (the provider policy off, the default)', () => {
+    it("uses the app's own Pimlico key with the system keys off", async () => {
+      vi.stubEnv('SYSTEM_PROVIDER_KEYS_ENABLED', '');
+      vi.stubEnv('PIMLICO_API_KEY', 'system-pimlico');
+      const { bundlerUrl } = await track();
+      expect(bundlerUrl).toBe(PIMLICO_WITH_APP_KEY);
+    });
+
+    it("does not contact Pimlico without the app's key or a bundler URL while the system keys are off", async () => {
+      vi.stubEnv('SYSTEM_PROVIDER_KEYS_ENABLED', '');
+      vi.stubEnv('PIMLICO_API_KEY', 'system-pimlico');
+      vi.resetModules();
+      const { processPimlicoTx: fresh } = await import('./pimlico');
+      const tx: any = { txKey: hash, chainId: 8453, appId: 'app-1', ownerId: 'owner-1' };
+      const redis: any = { get: vi.fn(), del: vi.fn(), set: vi.fn() };
+      const metric: any = { inc: vi.fn(), set: vi.fn() };
+      await expect(
+        fresh(tx, vi.fn(), vi.fn(), makeDb({ id: 'app-1' }) as any, redis, metric, metric, metric),
+      ).rejects.toThrow('Pimlico API key');
+      expect(mockErc4337Tracker).not.toHaveBeenCalled();
+    });
+
+    it('uses the system Pimlico key when SYSTEM_PROVIDER_KEYS_ENABLED is true', async () => {
+      vi.stubEnv('SYSTEM_PROVIDER_KEYS_ENABLED', 'true');
+      vi.stubEnv('PIMLICO_API_KEY', 'system-pimlico');
+      const { bundlerUrl } = await track({}, { id: 'app-1' });
+      expect(bundlerUrl).toBe('https://api.pimlico.io/v2/8453/rpc?apikey=system-pimlico');
+    });
+
+    it('accepts a bundler URL from the sync request without any Pimlico key', async () => {
+      vi.stubEnv('SYSTEM_PROVIDER_KEYS_ENABLED', '');
+      const { bundlerUrl } = await track({ bundlerUrl: 'https://bundler.customer.example/rpc' }, { id: 'app-1' });
+      expect(bundlerUrl).toBe('https://bundler.customer.example/rpc');
+    });
+
+    it('leaves the public RPC out of stage 2 unless PUBLIC_RPC_FALLBACK_ENABLED is true', async () => {
+      vi.stubEnv('PUBLIC_RPC_FALLBACK_ENABLED', '');
+      vi.stubEnv('ALCHEMY_API_KEY_FALLBACK', 'system-key');
+      const { rpcUrls } = await track();
+      expect(rpcUrls).toEqual(['https://base-mainnet.g.alchemy.com/v2/system-key']);
+    });
+
+    it("uses only the app's own Alchemy key in stage 2 while the system keys are off", async () => {
+      vi.stubEnv('PUBLIC_RPC_FALLBACK_ENABLED', '');
+      vi.stubEnv('SYSTEM_PROVIDER_KEYS_ENABLED', '');
+      vi.stubEnv('ALCHEMY_API_KEY_FALLBACK', 'system-key');
+      const { rpcUrls } = await track(
+        {},
+        { id: 'app-1', pimlicoApiKey: 'encrypted_key', alchemyApiKey: 'enc:app-key' },
+      );
+      expect(rpcUrls).toEqual(['https://base-mainnet.g.alchemy.com/v2/app-key']);
+    });
   });
 
   it('passes a public client bundler URL through to stage 1', async () => {

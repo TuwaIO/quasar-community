@@ -72,3 +72,30 @@ export const CHAIN_FINALITY_CONFIRMATIONS: Record<number, bigint> = {
 
 /** Fallback confirmations used when the chain is not in CHAIN_FINALITY_CONFIRMATIONS. */
 export const DEFAULT_FINALITY_CONFIRMATIONS = 1n;
+
+/**
+ * How long Quasar keeps personal data, as the Privacy Policy (Retention) and the Data Processing Addendum (Section 10)
+ * state it: change the policies and these values together.
+ */
+export const RETENTION = {
+  /** Webhook delivery logs: a monthly partition is dropped once this many months have passed since its first day */
+  WEBHOOK_DELIVERY_MONTHS: 3,
+  /** The email of a deleted account blocks re-registration for this many days; then its record is deleted */
+  DELETED_ACCOUNT_DAYS: 30,
+  /** Records of revoked memberships and of deleted organizations (who deleted them) */
+  AUDIT_RECORD_MONTHS: 12,
+} as const;
+
+/**
+ * Whether the hosted edition may take the data of an organization's app users (`organizations.data_processing`).
+ * `pending` until the organization concludes the Data Processing Addendum (and the standard contractual clauses where
+ * they apply); `own` for an organization of the operator of the deployment, which controls that data itself and is set
+ * by a system admin. The engine refuses the transactions of a `pending` organization; a Community Edition node does not
+ * check the status.
+ */
+export const DATA_PROCESSING = {
+  PENDING: 'pending',
+  OWN: 'own',
+} as const;
+
+export type DataProcessingStatus = (typeof DATA_PROCESSING)[keyof typeof DATA_PROCESSING];

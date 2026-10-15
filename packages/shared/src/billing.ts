@@ -12,10 +12,11 @@ export interface VolumeDiscountTier {
 export const DEFAULT_RPS_LIMIT = 5;
 
 /**
- * Quota units a new organization starts with. The `quotaBalance` default of the Organizations collection repeats the
- * literal, because the Community Edition codemod rewrites that literal to the community limit.
+ * Quota units a new organization starts with: 1,000 free units during the public beta of the hosted service (Terms
+ * of Service §5). The `quotaBalance` default and the delete guard of the Organizations collection repeat the literal,
+ * because the Community Edition codemods rewrite and cut them.
  */
-export const INITIAL_QUOTA_BALANCE = 100;
+export const INITIAL_QUOTA_BALANCE = 1000;
 
 /** Maximum allowed RPS concurrent limit */
 export const MAX_RPS_LIMIT = 300;

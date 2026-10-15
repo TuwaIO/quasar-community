@@ -23,7 +23,10 @@ import { ENGINE_GUARD_BLOCK_METRIC } from '../constants';
 import { DRIZZLE_READ } from '../database/database.module';
 import * as schema from '../database/schema/index';
 import { REDIS } from '../redis/redis.module';
+import { DATA_PROCESSING_REQUIRED, isDataIntakeOpen, REQUIRES_DATA_PROCESSING_KEY } from './data-processing';
+import { EDITION } from './edition';
 import { IS_INTERNAL_ONLY_KEY } from './internal.decorator';
+import { isAmlScreeningEnabled } from './provider-policy';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import { SecretRotationService } from './secret-rotation.service';
 
@@ -54,6 +57,11 @@ export interface AppFull {
   rpsLimit: string | number | null;
   ownerEmail: string | null;
   ownerName: string | null;
+  /**
+   * The organization's data processing status (`organizations.data_processing`), copied here when the app is
+   * hydrated; missing on an entry cached before the status existed, which keeps the intake closed (`data-processing.ts`).
+   */
+  dataProcessing?: string | null;
   name: string | null;
   ipWhitelist: string[];
   domainsWhitelist: string[];
@@ -110,6 +118,11 @@ export class EngineGuard implements CanActivate {
     ]);
 
     if (isPublic || isInternal) return true;
+
+    const requiresDataProcessing = this.reflector.getAllAndOverride<boolean>(REQUIRES_DATA_PROCESSING_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
 
     // 1. Internal Bypass (Hybrid Mode)
     const validSecrets = await this.getValidSecrets();
@@ -177,7 +190,14 @@ export class EngineGuard implements CanActivate {
       throw new ForbiddenException('Public credentials are read-only');
     }
 
-    return this.processAuthorizedRequest(context, app, validSecrets, credentialType, isIncomingSecretValid);
+    return this.processAuthorizedRequest(
+      context,
+      app,
+      validSecrets,
+      credentialType,
+      isIncomingSecretValid,
+      Boolean(requiresDataProcessing),
+    );
   }
 
   private async getValidSecrets(): Promise<string[]> {
@@ -212,15 +232,16 @@ export class EngineGuard implements CanActivate {
 
     // 2. DB Fallback (Hydration)
     //
-    // The organization is loaded for its RPS limit and for the address
-    // low-quota alerts go to, and nothing else — so its columns are named.
+    // The organization is loaded for its RPS limit, its data processing
+    // status and for the address low-quota alerts go to, and nothing else —
+    // so its columns are named.
     // Loading whole rows put every member's password hash, salt, reset token
     // and 2FA secret into the `:meta` cache entry below.
     const appRaw = await (this.db.query as any).apps.findFirst({
       where: (apps: any, { or, eq }: any) => or(eq(apps.publicKey, apiKey), eq(apps.secretKeyHash, lookupKey)),
       with: {
         organization: {
-          columns: { rpsLimit: true, createdBy: true },
+          columns: { rpsLimit: true, createdBy: true, dataProcessing: true },
           with: {
             organizationMembers: {
               columns: { role: true },
@@ -280,6 +301,8 @@ export class EngineGuard implements CanActivate {
       // drop this entry: the outbox `sync-redis-quota` event does it in the
       // engine, and `invalidateOrganizationAppMetadata` in the dashboard.
       rpsLimit: organization?.rpsLimit ?? null,
+      // Dropped with the entry the same way when an admin changes the status
+      dataProcessing: organization?.dataProcessing ?? null,
       ownerEmail,
       ownerName,
       ipWhitelist: appsIpWhitelists.map((i: any) => i.ip),
@@ -298,6 +321,7 @@ export class EngineGuard implements CanActivate {
     validSecrets: string[] = [],
     credentialType: 'public' | 'secret' | 'internal' = 'secret',
     internalSecretValid = false,
+    requiresDataProcessing = false,
   ): Promise<boolean> {
     const http = context.switchToHttp();
     const req = http.getRequest();
@@ -333,6 +357,17 @@ export class EngineGuard implements CanActivate {
         this.logger.warn(`[EngineGuard] Domain Rejected: ${domain} for App ${app.id}`);
         throw new ForbiddenException('Origin Domain not allowed');
       }
+    }
+
+    // --- Data processing ---
+    // The data of app users is refused until the organization can send it (data-processing.ts), before the request
+    // counts towards the RPS limit or the quota.
+    if (requiresDataProcessing && !isDataIntakeOpen(EDITION, app.dataProcessing)) {
+      this.logger.warn(
+        `[EngineGuard] Data processing not set up for Org ${app.organizationId}: ${req.method} ${req.url}`,
+      );
+      this.blockCounter.inc({ code: '403' });
+      throw new ForbiddenException(DATA_PROCESSING_REQUIRED);
     }
 
     const { organizationId } = app;
@@ -431,7 +466,7 @@ export class EngineGuard implements CanActivate {
       txCost += QUOTA_DEFAULTS.PAYMENTS_SURCHARGE_WEIGHT;
 
       // +5 penalty if AML is enabled but using system fallback GoPlus key
-      if (app.paymentSettings?.amlEnabled && !app.paymentSettings?.goPlusApiKey) {
+      if (isAmlScreeningEnabled() && app.paymentSettings?.amlEnabled && !app.paymentSettings?.goPlusApiKey) {
         txCost += QUOTA_DEFAULTS.FALLBACK_AML_WEIGHT;
       }
     }
