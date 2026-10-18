@@ -23,4 +23,22 @@ metrics:
 log:
   level: WARN
 
-accessLog: {}
+# The requests in JSON without the address and the user agent of the client: the time, the method, the path, the status
+# and the duration. The prefetch header of the Next.js router stays, so the weekly access review tells a prefetch of an
+# admin page, which renders no data, from a view. Written to a file, not to the container log, which Docker keeps by
+# size: `traefik-log-rotate` starts a new file every day and deletes the old ones, so no request is kept longer than 7
+# days; Promtail sends it to Loki, which keeps it 7 days as well
+accessLog:
+  filePath: /var/log/traefik/access.log
+  format: json
+  fields:
+    defaultMode: keep
+    names:
+      ClientAddr: drop
+      ClientHost: drop
+      ClientPort: drop
+      ClientUsername: drop
+    headers:
+      defaultMode: drop
+      names:
+        Next-Router-Prefetch: keep

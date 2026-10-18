@@ -154,7 +154,8 @@ export const POST = withRateLimit(async (req: Request, { params }: { params: Pro
         url,
         events: events as WebhookEndpoint['events'],
         description: description || '',
-        txType: txType || '',
+        // Every transaction type unless the caller names one (the collection's default; an empty value is invalid)
+        txType: txType?.trim() || '*',
         isActive: true,
         signingSecret: '', // Overridden by hook
       },

@@ -7,6 +7,7 @@ import type { CollectionConfig } from 'payload';
 import { APIError } from 'payload';
 
 import { isMemberOfOrganization, isOrgAdminOrOwner } from '@/lib/access';
+import { recordDataAccess } from '@/lib/dataAccess';
 import { redisApi } from '@/lib/redis';
 import type { App } from '@/payload-types';
 
@@ -351,6 +352,8 @@ export const Apps: CollectionConfig = {
     },
   ],
   hooks: {
+    // Each view of this customer data in the admin panel is recorded
+    afterOperation: [recordDataAccess('apps')],
     beforeChange: [
       async ({ data, req, operation, originalDoc }) => {
         const isMasked = (val?: string | null) => {

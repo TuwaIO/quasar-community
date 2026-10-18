@@ -1,7 +1,8 @@
 import { decrypt, encrypt } from '@tuwaio/shared/encryption';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { decryptWithKey, encryptWithKey, parseKey } from './rotate-encryption-keys';
+import * as schema from '../database/schema/index';
+import { decryptWithKey, encryptWithKey, parseKey, ROTATED_FIELDS } from './rotate-encryption-keys';
 
 const OLD_KEY_HEX = 'a'.repeat(64);
 const NEW_KEY_HEX = 'b'.repeat(64);
@@ -23,6 +24,21 @@ describe('rotate-encryption-keys', () => {
 
     vi.stubEnv('ENCRYPTION_KEY', NEW_KEY_HEX);
     expect(decrypt(rotated)).toBe('sk_live_secret');
+  });
+
+  // Every field stored with `qenc:` must be rotated, or it can no longer be read after the switch to the new key
+  it('rotates the keys of apps and those sent with transactions', () => {
+    const rotated = ROTATED_FIELDS.map(([table, field]) => [table, field]);
+
+    expect(rotated).toEqual(
+      expect.arrayContaining([
+        [schema.apps, 'pimlicoApiKey'],
+        [schema.transactions, 'bundlerUrl'],
+        [schema.transactions, 'pimlicoApiKey'],
+        [schema.apps, 'secretKey'],
+        [schema.appsRpcConfigs, 'rpcUrl'],
+      ]),
+    );
   });
 
   it('rejects a key that is not 32 bytes', () => {

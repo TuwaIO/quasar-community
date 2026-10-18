@@ -19,6 +19,13 @@ async function purgedAt(now: string): Promise<string[][]> {
         return { rowCount: 0 };
       }),
     })),
+    // Tables the server schema does not model are deleted by SQL: the table and the cutoff of each statement
+    execute: vi.fn(async (statement: SQL) => {
+      const query = new PgDialect().sqlToQuery(statement);
+      const table = /DELETE FROM "([a-z_]+)"/.exec(query.sql)?.[1] ?? query.sql;
+      deletes.push([table, String(query.params[0])]);
+      return { rowCount: 0 };
+    }),
   };
   const redlock = { using: vi.fn(async (_keys: string[], _ttl: number, run: () => Promise<void>) => run()) };
 
@@ -39,6 +46,9 @@ describe('RecordRetentionService', () => {
       ['deleted_accounts', '2026-09-14T03:00:00.000Z'],
       ['deleted_organization_members', '2025-10-14T03:00:00.000Z'],
       ['deleted_organizations', '2025-10-14T03:00:00.000Z'],
+      // Round 10: the data access log for 1 year, the weekly access reviews for 3 years
+      ['data_access_log', '2025-10-14T03:00:00.000Z'],
+      ['access_reviews', '2023-10-14T03:00:00.000Z'],
     ]);
   });
 });

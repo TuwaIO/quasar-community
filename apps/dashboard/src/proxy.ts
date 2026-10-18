@@ -41,6 +41,31 @@ const ENGINE_CONNECT_SOURCES = [
   .filter(Boolean)
   .join(' ');
 
+/**
+ * A page opened from a link on another site (an email, Discord, an alert) arrives as a top-level GET navigation with
+ * `Sec-Fetch-Site: cross-site` and no Origin. Payload refuses the session cookie of such a request (its CSRF check since
+ * 3.90), so the page renders signed out: the admin panel sends to its login, the dashboard to the overview. A page view
+ * changes nothing, and browsers send even a `SameSite=Lax` cookie on it, so it is passed on as a direct navigation
+ * (`none`). Scripts, forms and API routes keep the check.
+ *
+ * @returns The request headers to pass on, or `null` to leave the request as it is.
+ */
+function crossSiteNavigationHeaders(request: NextRequest): Headers | null {
+  const { headers } = request;
+  if (
+    request.method !== 'GET' ||
+    request.nextUrl.pathname.startsWith('/api/') ||
+    headers.get('sec-fetch-site') !== 'cross-site' ||
+    headers.get('sec-fetch-mode') !== 'navigate' ||
+    headers.get('sec-fetch-dest') !== 'document'
+  ) {
+    return null;
+  }
+  const passed = new Headers(headers);
+  passed.set('sec-fetch-site', 'none');
+  return passed;
+}
+
 export async function proxy(request: NextRequest) {
   const payloadToken = request.cookies.get('payload-token');
   const path = request.nextUrl.pathname;
@@ -188,7 +213,10 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  const response = NextResponse.next();
+  const navigationHeaders = crossSiteNavigationHeaders(request);
+  const response = navigationHeaders
+    ? NextResponse.next({ request: { headers: navigationHeaders } })
+    : NextResponse.next();
 
   // 2. Content Security Policy (CSP) Consolidation
   const isDev = process.env.NODE_ENV === 'development';

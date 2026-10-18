@@ -13,6 +13,7 @@ const generateSigningSecret = (): string => {
 };
 
 import { isAdminFieldLevel, isAppOrgAdminOrOwner, isMemberOfAppOrganization } from '@/lib/access';
+import { recordDataAccess } from '@/lib/dataAccess';
 import { isLocalhostUrl } from '@/lib/webhook-utils';
 
 /**
@@ -183,6 +184,8 @@ export const WebhookEndpoints: CollectionConfig = {
     },
   ],
   hooks: {
+    // Each view of this customer data in the admin panel is recorded
+    afterOperation: [recordDataAccess('webhook-endpoints')],
     beforeChange: [
       async ({ data, req, operation, originalDoc }) => {
         const isGlobalAdmin = !req.user || Boolean(req.user.roles?.includes('admin'));

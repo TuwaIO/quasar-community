@@ -11,6 +11,17 @@ export function maskKey(key: string | null | undefined): string {
 }
 
 /**
+ * Masks an email address for logs (e.g., j***e@example.com): the first and last letter of the name and the domain.
+ * Anything that is not one address becomes `***`.
+ */
+export function maskEmail(email: string | null | undefined): string {
+  const parts = (email ?? '').split('@');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return '***';
+  const [name, domain] = parts;
+  return `${name.length > 2 ? `${name[0]}***${name[name.length - 1]}` : '***'}@${domain}`;
+}
+
+/**
  * Resolves a raw URL string by stripping quotes and expanding any nested ${VAR_NAME}
  * environment variables with process.env values.
  *

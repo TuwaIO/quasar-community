@@ -7,6 +7,7 @@ import { Counter, Gauge } from 'prom-client';
 import { Hex, zeroHash } from 'viem';
 
 import { isSafeTransactionServiceEnabled } from '../../common/provider-policy';
+import { trackingLagSeconds } from './lag';
 
 type UpdateFn = (txKey: string, data: UpdatableTransactionFields, isTerminal?: boolean) => Promise<void>;
 
@@ -19,6 +20,7 @@ export async function processSafeTx(
   errorCounter: Counter<string>,
 ) {
   console.log(`[SAFE TRACKER] Starting for ${tx.txKey}`);
+  const trackingStartedAt = Date.now();
   if (!tx.txKey) {
     console.error(`[SAFE TRACKER] Missing txKey for tracking.`);
     return;
@@ -38,8 +40,7 @@ export async function processSafeTx(
     onSuccess: async (response) => {
       console.log(`[SAFE TRACKER] SUCCESS: ${tx.txKey}`);
       const executionTime = response.executionDate ? new Date(response.executionDate).getTime() : Date.now();
-      const lagMs = Math.max(0, Date.now() - executionTime);
-      const lagSeconds = lagMs / 1000;
+      const lagSeconds = trackingLagSeconds(executionTime, trackingStartedAt);
       // Record metrics
       lagGauge.set({ ecosystem: 'Safe', chainId: String(tx.chainId) }, lagSeconds);
       txCounter.inc({

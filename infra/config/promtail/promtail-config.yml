@@ -21,3 +21,28 @@ scrape_configs:
         target_label: 'service_name'
       - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
         target_label: 'project_name'
+
+  # The access log of Traefik, which it writes to a file kept at most 7 days (traefik-log-rotate); the access review
+  # reads the requests to the admin panel from it by `service_name`
+  - job_name: traefik_access
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: traefik-access
+          service_name: traefik
+          __path__: /var/log/traefik/access.log
+
+  # The system journal of the host: the SSH sign-ins that the weekly access review checks (sshd of ssh.service)
+  - job_name: journal
+    # No path: Promtail reads both /var/log/journal and /run/log/journal. journald writes to /run when it cannot write
+    # to /var (a full disk), and keeps doing so until `journalctl --flush`; reading only /var lost the SSH sign-ins on
+    # staging from 2026-10-16
+    journal:
+      max_age: 12h
+      labels:
+        job: systemd-journal
+    relabel_configs:
+      - source_labels: ['__journal__systemd_unit']
+        target_label: 'unit'
+      - source_labels: ['__journal__hostname']
+        target_label: 'host'

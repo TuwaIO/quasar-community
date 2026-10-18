@@ -60,6 +60,9 @@ scrape_configs:
     metrics_path: '/metrics'
     docker_sd_configs:
       - host: http://docker-proxy:2375
+        # Containers come and go on each deploy: a removed one must leave the targets well within the 1 minute
+        # of InstanceDown (the default of 60 s kept scraping it and fired the alert on every rollout)
+        refresh_interval: 15s
     relabel_configs:
       - source_labels: [__meta_docker_container_label_com_docker_compose_service]
         regex: 'quasar-nest-api|quasar-worker'
@@ -79,6 +82,9 @@ scrape_configs:
     metrics_path: '/api/metrics'
     docker_sd_configs:
       - host: http://docker-proxy:2375
+        # Containers come and go on each deploy: a removed one must leave the targets well within the 1 minute
+        # of InstanceDown (the default of 60 s kept scraping it and fired the alert on every rollout)
+        refresh_interval: 15s
     relabel_configs:
       - source_labels: [__meta_docker_container_label_com_docker_compose_service]
         regex: 'quasar-app'

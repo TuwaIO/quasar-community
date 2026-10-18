@@ -103,7 +103,7 @@ export function TwoFactorInput({
   }, [digits, onComplete]);
 
   return (
-    <div className={cn('flex items-center justify-center gap-2.5', className)}>
+    <div className={cn('flex items-center justify-center gap-1.5 sm:gap-2', className)}>
       {Array.from({ length: TOTP_CODE_LENGTH }).map((_, index) => {
         const isFilled = Boolean(digits[index]);
 
@@ -123,13 +123,13 @@ export function TwoFactorInput({
             onKeyDown={(e) => handleKeyDown(index, e)}
             whileFocus={{ scale: 1.04 }}
             className={cn(
-              'h-14 w-12 rounded-[var(--tuwa-rounded-corners)] border text-center text-xl font-bold outline-none transition-all shadow-sm',
+              'h-[54px] w-[46px] shrink-0 rounded-[var(--tuwa-rounded-corners)] border text-center font-mono text-[22px] font-bold outline-none transition-all',
               'disabled:cursor-not-allowed disabled:opacity-50',
-              'border-[var(--tuwa-border-primary)] bg-[var(--tuwa-bg-primary)] text-[var(--tuwa-text-primary)] placeholder-[var(--tuwa-text-tertiary)]',
-              'hover:border-[var(--tuwa-border-hover,var(--tuwa-border-primary))] hover:bg-[var(--tuwa-bg-muted)]',
+              'border-[var(--tuwa-border-primary)] bg-[var(--tuwa-bg-secondary)] text-[var(--tuwa-text-primary)] placeholder-[var(--tuwa-text-tertiary)]',
+              'hover:bg-[var(--tuwa-bg-muted)]',
               'focus:ring-2 focus:ring-[var(--tuwa-text-accent)]/20 focus:border-[var(--tuwa-text-accent)]',
+              isFilled && 'border-[var(--tuwa-text-accent)]',
               inputClassName,
-              isFilled && 'border-[var(--tuwa-border-hover,var(--tuwa-border-primary))]',
             )}
             maxLength={1}
             disabled={disabled}

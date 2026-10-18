@@ -12,10 +12,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { mock, MockProxy } from 'vitest-mock-extended';
 import * as zlib from 'zlib';
 
+import { EDITION } from '../common/edition';
 import { WEBHOOK_DELIVERY_METRIC, WEBHOOK_LATENCY_METRIC } from '../constants';
 import { DRIZZLE } from '../database/database.module';
 import { REDIS } from '../redis/redis.module';
-import { redactUrl, WebhookProcessor } from './webhook.processor';
+import { redactUrl, RESPONSE_BODY_NOT_KEPT, WebhookProcessor } from './webhook.processor';
 
 // Mock DNS resolution to control SSRF behavior
 const mockResolve4 = vi.fn();
@@ -56,6 +57,14 @@ describe('WebhookProcessor — Security, Streaming Limits & SSRF Hardening (WEB-
 
     db.insert.mockReturnThis();
     db.values.mockResolvedValue({});
+    // An organization whose intake is open and that keeps the bodies of its webhook responses
+    db.query = {
+      organizations: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ keepWebhookResponses: true, dataProcessing: 'scc', intakeClosesAt: null }),
+      },
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -473,6 +482,63 @@ describe('WebhookProcessor — Security, Streaming Limits & SSRF Hardening (WEB-
           responseBody: JSON.stringify({ secretKey: '***MASKED***', status: 'saved' }),
         }),
       );
+    });
+
+    // For an organization that keeps no response bodies (`organizations.keep_webhook_responses`) the engine keeps only
+    // the status of a webhook response, never its content
+    it('keeps only the status of a response for an organization that keeps no response bodies', async () => {
+      configService.get.mockReturnValue('false');
+      db.query = { organizations: { findFirst: vi.fn().mockResolvedValue({ keepWebhookResponses: false }) } };
+      vi.spyOn(processor, 'makeRequest').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ customer: 'Anna Schmidt', email: 'anna@example.com' }),
+      });
+
+      await processor.process(createMockJob('https://public-api.example.com/webhook'));
+
+      const stored = db.values.mock.calls[0][0];
+      expect(stored).toMatchObject({ httpStatus: '200', success: true, responseBody: RESPONSE_BODY_NOT_KEPT });
+      expect(JSON.stringify(stored)).not.toContain('Anna');
+    });
+
+    // While the intake of an organization is closed (`isDataIntakeOpen`), the engine takes no content of its responses
+    // either; a Community Edition node does not check the status of an organization
+    it.runIf(EDITION === 'cloud')(
+      'keeps only the status of a response while the intake of the organization is closed',
+      async () => {
+        configService.get.mockReturnValue('false');
+        vi.spyOn(processor, 'makeRequest').mockResolvedValue({
+          ok: true,
+          status: 200,
+          text: async () => 'Thanks, Anna',
+        });
+        for (const closed of [
+          { keepWebhookResponses: true, dataProcessing: 'pending', intakeClosesAt: null },
+          { keepWebhookResponses: true, dataProcessing: 'scc', intakeClosesAt: '2026-01-01T00:00:00.000Z' },
+          null,
+        ]) {
+          db.values.mockClear();
+          (processor as unknown as { keepResponses: Map<string, unknown> }).keepResponses.clear();
+          db.query = { organizations: { findFirst: vi.fn().mockResolvedValue(closed) } };
+          await processor.process(createMockJob('https://public-api.example.com/webhook'));
+          expect(db.values.mock.calls[0][0].responseBody).toBe(RESPONSE_BODY_NOT_KEPT);
+        }
+      },
+    );
+
+    it('keeps no response body while it cannot read whether the organization keeps them', async () => {
+      configService.get.mockReturnValue('false');
+      db.query = { organizations: { findFirst: vi.fn().mockRejectedValue(new Error('connection lost')) } };
+      vi.spyOn(processor, 'makeRequest').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => 'Thanks, Anna',
+      });
+
+      await processor.process(createMockJob('https://public-api.example.com/webhook'));
+
+      expect(db.values.mock.calls[0][0].responseBody).toBe(RESPONSE_BODY_NOT_KEPT);
     });
   });
 });

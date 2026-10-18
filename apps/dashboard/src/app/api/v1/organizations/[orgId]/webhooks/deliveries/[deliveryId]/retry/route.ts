@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccessOrSystemAdmin } from '@/lib/auth-utils';
+import { recordAdminView } from '@/lib/dataAccess';
 import { getQueue } from '@/lib/redis';
 import { canRetryWebhookDelivery } from '@/lib/webhook-utils';
 import { apps, transactions, webhook_deliveries, webhook_endpoints } from '@/payload-generated-schema';
@@ -26,6 +27,8 @@ export const POST = withRateLimit(
 
       const access = await verifyOrgAccessOrSystemAdmin(payload, user, orgId, ['owner', 'admin']);
       if (access instanceof NextResponse) return access;
+      // A system admin opens customer data here past access control: the view is recorded
+      await recordAdminView(payload, { user, collection: 'webhook-deliveries', id: deliveryId });
 
       const db = payload.db.drizzle;
 

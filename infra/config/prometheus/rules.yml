@@ -2,13 +2,26 @@ groups:
   - name: QuasarAlerts
     rules:
       - alert: InstanceDown
-        expr: up == 0
+        expr: up{job!~"quasar-nest|quasar-app"} == 0
         for: 1m
         labels:
           severity: critical
         annotations:
           summary: 'Instance {{ $labels.instance }} down'
           description: '{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 1 minute.'
+
+      # The containers of the app and the engine are replaced on every deploy. A replaced one stops answering when its
+      # graceful stop starts (up to 10 s), leaves Docker discovery within 15 s plus the 5 s reload of the targets, and
+      # Prometheus keeps its last `up` for two more scrape intervals (about 33 s) before marking it stale: up to about
+      # 63 s of `up == 0` without an outage, which fired the 1-minute rule after a deploy on 17 Oct 2026.
+      - alert: ContainerDown
+        expr: up{job=~"quasar-nest|quasar-app"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Container {{ $labels.instance }} down'
+          description: '{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 2 minutes.'
 
       - alert: HighMemoryUsage
         expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.9
@@ -46,8 +59,13 @@ groups:
           summary: 'High Event Loop Lag on NestJS'
           description: 'Event loop lag is above 100ms on {{ $labels.instance }} for more than 1 minute. Possible CPU throttling or heavy blocking operations.'
 
+      # Only while transactions are tracked: the gauge keeps the last lag it was set to, so one slow transaction kept
+      # the alert firing through the quiet hours after it
       - alert: Pulsar_SyncLag
-        expr: pulsar_sync_lag_seconds > 60
+        expr: |
+          pulsar_sync_lag_seconds > 60
+            and on (instance, ecosystem, chainId)
+          sum by (instance, ecosystem, chainId) (increase(pulsar_tx_total[10m])) > 0
         for: 2m
         labels:
           severity: critical
@@ -137,6 +155,17 @@ groups:
           summary: 'Redis API Cluster Health Failure'
           description: 'API Redis cluster state is in fail status or cluster has unassigned slots on {{ $labels.instance }}.'
 
+      # A Redis that cannot persist refuses every write (MISCONF) while PING, and so every health check, still passes:
+      # on 2026-10-16 a full staging disk stopped the queues that way without one alert.
+      - alert: RedisPersistenceFailing
+        expr: redis_rdb_last_bgsave_status{job=~"redis-api|redis-ui"} == 0 or redis_aof_last_write_status{job=~"redis-api|redis-ui"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Redis cannot write to disk on {{ $labels.instance }}'
+          description: 'The last snapshot or append-only write of {{ $labels.instance }} failed. Redis refuses every write until one succeeds: the queues stop and the engine fails, while health checks still pass. Check the free disk first.'
+
       - alert: AnomalousBillingQuotaDelta
         expr: sum(rate(webhook_delivery_total{status="success"}[5m])) > 10 * sum(rate(webhook_delivery_total{status="success"}[5m] offset 1h))
         for: 5m
@@ -154,6 +183,16 @@ groups:
         annotations:
           summary: 'Host CPU usage is above 95%'
           description: 'CPU usage has been above 95% for 3 minutes. Immediate attention required.'
+
+      # Before the critical one, while a deploy still fits: it pulls about 5 GB of images at once
+      - alert: HostDiskSpaceWarning
+        expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Disk usage above 80% on {{ $labels.mountpoint }}'
+          description: 'The next deploy may not fit. Prune unused Docker images and vacuum the journal.'
 
       - alert: HostDiskSpaceCritical
         expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 > 90
@@ -312,7 +351,6 @@ groups:
         annotations:
           summary: 'Alertmanager Dead-mans switch'
           description: 'This is an alert meant to ensure that the entire alerting pipeline is functional.'
-
 
   - name: QuasarRecordingRules
     interval: 30s

@@ -22,7 +22,7 @@ permissions:
 jobs:
   rollback:
     name: Rollback ${{ inputs.environment }} to ${{ inputs.image_tag }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     environment: ${{ inputs.environment == 'production' && 'production-deploy' || 'staging-deploy' }}
     steps:

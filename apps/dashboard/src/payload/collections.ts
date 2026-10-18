@@ -1,3 +1,5 @@
+import { AccessReviews } from '@/collections/ContextAudit/AccessReviews';
+import { DataAccessLog } from '@/collections/ContextAudit/DataAccessLog';
 import { DeletedAccounts } from '@/collections/ContextAudit/DeletedAccounts';
 import { DeletedOrganizationMembers } from '@/collections/ContextAudit/DeletedOrganizationMembers';
 import { DeletedOrganizations } from '@/collections/ContextAudit/DeletedOrganizations';
@@ -23,6 +25,8 @@ export const collections = [
   DeletedAccounts,
   DeletedOrganizations,
   DeletedOrganizationMembers,
+  DataAccessLog,
+  AccessReviews,
   WebhookEndpoints,
   WebhookDeliveries,
   OutboxEvents,

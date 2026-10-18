@@ -115,7 +115,9 @@ describe('Retry routes apply the same conditions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     selectResults.length = 0;
-    mockAuthenticateRequest.mockResolvedValue({ payload: { db: { drizzle: { select, update } } }, user });
+    // An organization whose intake is open (the route refuses a retry while it is closed: transaction-retry-intake)
+    const findByID = vi.fn(async () => ({ dataProcessing: 'scc', intakeClosesAt: null }));
+    mockAuthenticateRequest.mockResolvedValue({ payload: { db: { drizzle: { select, update } }, findByID }, user });
     mockVerifyAccess.mockResolvedValue({ allowed: true });
     mockRedisDel.mockResolvedValue(1);
   });

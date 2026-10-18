@@ -27,6 +27,7 @@ import {
   validateTransaction,
 } from '@tuwaio/pulsar-core';
 import { CHAIN_FINALITY_CONFIRMATIONS, DEFAULT_FINALITY_CONFIRMATIONS } from '@tuwaio/shared/constants';
+import { encrypt } from '@tuwaio/shared/encryption';
 import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import { Queue } from 'bullmq';
 import { and, eq, isNull, or } from 'drizzle-orm';
@@ -542,7 +543,8 @@ export class SyncController {
           payload: sanitized.payload ?? null,
           // Metadata fields
           confirmations: sanitized.confirmations != null ? String(sanitized.confirmations) : null,
-          rpcUrl: sanitized.rpcUrl ?? null,
+          // An RPC endpoint sent with a transaction is never used (trackers read the app's own settings), so it is not kept
+          rpcUrl: null,
           requiredConfirmations: String(
             Math.max(
               sanitized.requiredConfirmations != null ? Number(sanitized.requiredConfirmations) : 0,
@@ -558,8 +560,11 @@ export class SyncController {
           ...('maxFeePerGas' in sanitized && { maxFeePerGas: sanitized.maxFeePerGas ?? null }),
           ...('maxPriorityFeePerGas' in sanitized && { maxPriorityFeePerGas: sanitized.maxPriorityFeePerGas ?? null }),
           ...('replacedTxHash' in sanitized && { replacedTxHash: sanitized.replacedTxHash ?? null }),
-          ...('bundlerUrl' in sanitized && { bundlerUrl: sanitized.bundlerUrl ?? null }),
-          ...('pimlicoApiKey' in sanitized && { pimlicoApiKey: sanitized.pimlicoApiKey ?? null }),
+          // Credentials of the customer: kept encrypted, like the keys in the app's settings (DPA, Annex B)
+          ...('bundlerUrl' in sanitized && { bundlerUrl: sanitized.bundlerUrl ? encrypt(sanitized.bundlerUrl) : null }),
+          ...('pimlicoApiKey' in sanitized && {
+            pimlicoApiKey: sanitized.pimlicoApiKey ? encrypt(sanitized.pimlicoApiKey) : null,
+          }),
           // Solana fields
           ...('fee' in sanitized && { fee: sanitized.fee != null ? String(sanitized.fee) : null }),
           ...('slot' in sanitized && { slot: sanitized.slot != null ? String(sanitized.slot) : null }),

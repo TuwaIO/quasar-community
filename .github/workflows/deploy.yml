@@ -24,7 +24,7 @@ concurrency:
 jobs:
   quality-check:
     name: Check or Run Quality Gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -155,7 +155,7 @@ jobs:
   build-app:
     name: Build App & Migrate Images
     needs: quality-check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
     outputs:
       app_digest: ${{ steps.build-app.outputs.digest }}
@@ -271,7 +271,7 @@ jobs:
   build-nest:
     name: Build Nest Image
     needs: quality-check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
     outputs:
       nest_digest: ${{ steps.build-nest.outputs.digest }}
@@ -341,7 +341,7 @@ jobs:
   release-security:
     name: Sign and verify release artifacts
     needs: [build-app, build-nest]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
@@ -465,7 +465,7 @@ jobs:
     name: Deploy to ${{ github.ref_name }}
     needs: release-security
     if: ${{ vars.DEPLOY_ENABLED == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: ${{ github.ref_name == 'main' && 'production-deploy' || 'staging-deploy' }}
     timeout-minutes: 60
     steps:
@@ -500,6 +500,9 @@ jobs:
           username: ${{ github.ref_name == 'main' && secrets.PROD_SSH_USER || secrets.STAGING_SSH_USER }}
           key: ${{ github.ref_name == 'main' && secrets.PROD_SSH_KEY || secrets.STAGING_SSH_KEY }}
           fingerprint: ${{ github.ref_name == 'main' && secrets.PROD_SSH_FINGERPRINT || secrets.STAGING_SSH_FINGERPRINT }}
+          # The default of 10 minutes cuts a deploy off halfway: a full one takes about 8, and it can wait up to 5 more
+          # for the image lock of the Community stand.
+          command_timeout: 30m
           envs: PROJECT_PATH,ENV_SUFFIX,REPO_OWNER,BRANCH_NAME,RELEASE_COMMIT,QUASAR_IMAGE_TAG,QUASAR_APP_IMAGE,QUASAR_NEST_IMAGE,QUASAR_MIGRATE_IMAGE,GHCR_PAT,ACTOR
           script: |
             cd "$PROJECT_PATH" || exit 1
@@ -556,7 +559,7 @@ jobs:
     name: Archive production release evidence
     needs: [release-security, deploy]
     if: ${{ github.ref_name == 'main' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: write

@@ -8,11 +8,15 @@ route:
   repeat_interval: 4h
   receiver: 'notify'
   routes:
-    # Dead-man's switch / Watchdog silent routing
+    # Dead-man's switch: Watchdog always fires, and goes every minute to an external heartbeat monitor
+    # (ALERTMANAGER_HEARTBEAT_URL, e.g. UptimeRobot), which alerts when the minutes stop: the host, Prometheus or
+    # Alertmanager is down, and no other alert could tell. Without the URL it goes nowhere.
     - match:
         alertname: Watchdog
-      receiver: 'null-receiver'
-      repeat_interval: 12h
+      receiver: 'heartbeat'
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
 
     # Critical severity alerts: faster delivery and shorter repeat interval
     - match:
@@ -44,7 +48,8 @@ inhibit_rules:
     equal: ['instance']
 
 receivers:
-  - name: 'null-receiver'
+  - name: 'heartbeat'
+    # __HEARTBEAT_RECEIVER_CONFIGS__ (this line becomes the webhook at container start, see docker-compose.yml)
 
   - name: 'notify'
-    __NOTIFY_RECEIVER_CONFIGS__
+    # __NOTIFY_RECEIVER_CONFIGS__ (this line becomes the Discord and Telegram configs at container start)

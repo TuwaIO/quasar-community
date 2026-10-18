@@ -95,7 +95,8 @@ export const Users: CollectionConfig = {
       async ({ doc, operation, req }) => {
         if (operation === 'create' && doc.id) {
           const startTime = Date.now();
-          req.payload.logger.info(`[Users] Starting post-registration for ${doc.email} (${doc.id})...`);
+          // The id, not the email address: the logs are kept in Loki
+          req.payload.logger.info(`[Users] Starting post-registration for ${doc.id}...`);
           try {
             const org = await req.payload.create({
               collection: 'organizations',

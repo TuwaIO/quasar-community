@@ -84,6 +84,10 @@ export const RETENTION = {
   DELETED_ACCOUNT_DAYS: 30,
   /** Records of revoked memberships and of deleted organizations (who deleted them) */
   AUDIT_RECORD_MONTHS: 12,
+  /** The record of each view of customer data in the admin panel */
+  DATA_ACCESS_LOG_MONTHS: 12,
+  /** The monthly reviews of that record */
+  ACCESS_REVIEW_MONTHS: 36,
 } as const;
 
 /**
@@ -96,6 +100,10 @@ export const RETENTION = {
 export const DATA_PROCESSING = {
   PENDING: 'pending',
   OWN: 'own',
+  /** Both parties signed the standard contractual clauses. */
+  SCC: 'scc',
+  /** TUWA reviewed the answers of the organization and recorded that the clauses are not needed. */
+  NOT_REQUIRED: 'not_required',
 } as const;
 
 export type DataProcessingStatus = (typeof DATA_PROCESSING)[keyof typeof DATA_PROCESSING];

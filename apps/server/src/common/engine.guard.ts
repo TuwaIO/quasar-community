@@ -62,6 +62,11 @@ export interface AppFull {
    * hydrated; missing on an entry cached before the status existed, which keeps the intake closed (`data-processing.ts`).
    */
   dataProcessing?: string | null;
+  /**
+   * When the organization's intake closes (`organizations.intake_closes_at`, see `data-processing.ts`), copied here the
+   * same way.
+   */
+  intakeClosesAt?: string | null;
   name: string | null;
   ipWhitelist: string[];
   domainsWhitelist: string[];
@@ -226,7 +231,11 @@ export class EngineGuard implements CanActivate {
       try {
         return JSON.parse(cached);
       } catch (e) {
-        this.logger.error(`[EngineGuard] Failed to parse cached metadata for ${apiKey}:`, e);
+        // Only the end of the key, as for an invalid key: the logs never carry a whole key
+        this.logger.error(
+          `[EngineGuard] Failed to parse cached metadata for key ...${apiKey.toString().slice(-6)}:`,
+          e,
+        );
       }
     }
 
@@ -241,7 +250,7 @@ export class EngineGuard implements CanActivate {
       where: (apps: any, { or, eq }: any) => or(eq(apps.publicKey, apiKey), eq(apps.secretKeyHash, lookupKey)),
       with: {
         organization: {
-          columns: { rpsLimit: true, createdBy: true, dataProcessing: true },
+          columns: { rpsLimit: true, createdBy: true, dataProcessing: true, intakeClosesAt: true },
           with: {
             organizationMembers: {
               columns: { role: true },
@@ -303,6 +312,8 @@ export class EngineGuard implements CanActivate {
       rpsLimit: organization?.rpsLimit ?? null,
       // Dropped with the entry the same way when an admin changes the status
       dataProcessing: organization?.dataProcessing ?? null,
+      // An absolute time, compared with the clock on every request: an entry cached before it still closes on time
+      intakeClosesAt: organization?.intakeClosesAt ?? null,
       ownerEmail,
       ownerName,
       ipWhitelist: appsIpWhitelists.map((i: any) => i.ip),
@@ -362,7 +373,7 @@ export class EngineGuard implements CanActivate {
     // --- Data processing ---
     // The data of app users is refused until the organization can send it (data-processing.ts), before the request
     // counts towards the RPS limit or the quota.
-    if (requiresDataProcessing && !isDataIntakeOpen(EDITION, app.dataProcessing)) {
+    if (requiresDataProcessing && !isDataIntakeOpen(EDITION, app.dataProcessing, app.intakeClosesAt, new Date())) {
       this.logger.warn(
         `[EngineGuard] Data processing not set up for Org ${app.organizationId}: ${req.method} ${req.url}`,
       );

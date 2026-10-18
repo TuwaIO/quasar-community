@@ -51,24 +51,6 @@ services:
     cpus: 2.0
     mem_limit: 2048m
 
-  pgadmin:
-    labels:
-      - 'traefik.enable=true'
-      - 'traefik.docker.network=public_net'
-      - 'traefik.http.services.pgadmin.loadbalancer.server.port=80'
-      - 'traefik.http.routers.pgadmin.rule=Host(`pgadmin.${DOMAIN}`)'
-      - 'traefik.http.routers.pgadmin.entrypoints=web'
-      - 'traefik.http.routers.pgadmin.middlewares=basic-auth'
-
-  redisinsight:
-    labels:
-      - 'traefik.enable=true'
-      - 'traefik.docker.network=public_net'
-      - 'traefik.http.services.redisinsight.loadbalancer.server.port=5540'
-      - 'traefik.http.routers.redisinsight.rule=Host(`redis.${DOMAIN}`)'
-      - 'traefik.http.routers.redisinsight.entrypoints=web'
-      - 'traefik.http.routers.redisinsight.middlewares=basic-auth'
-
   quasar-app:
     build: !reset null
     image: ${QUASAR_APP_IMAGE:?QUASAR_APP_IMAGE must be a signed ghcr.io image@sha256 reference}

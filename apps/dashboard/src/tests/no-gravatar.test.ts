@@ -3,9 +3,12 @@ import path from 'node:path';
 
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/collections/ContextUsers/Users', () => ({ Users: { slug: 'users' } }));
 
 import { UserAvatar } from '@/components/ui/UserAvatar';
+import { adminConfig } from '@/payload/admin';
 
 // Avatars were loaded from www.gravatar.com with the SHA-256 of the user's email: a third-party request that the
 // Privacy Policy does not list. The dashboard shows the initial of the account instead.
@@ -25,6 +28,10 @@ describe('avatars without Gravatar', () => {
 
     expect(html).toContain('>A<');
     expect(html).not.toContain('<img');
+  });
+
+  it('keeps the admin panel on the built-in avatar of Payload, whose default loads from gravatar.com', () => {
+    expect(adminConfig?.avatar).toBe('default');
   });
 
   it('leaves Gravatar out of the dashboard entirely', () => {

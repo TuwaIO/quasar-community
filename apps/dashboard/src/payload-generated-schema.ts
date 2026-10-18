@@ -49,8 +49,33 @@ export const enum_transactions_confirmation_status = pgEnum('enum_transactions_c
 export const enum_apps_environment = pgEnum('enum_apps_environment', ['live', 'test']);
 export const enum_apps_kind = pgEnum('enum_apps_kind', ['basic', 'payments']);
 export const enum_quota_usage_ledger_status = pgEnum('enum_quota_usage_ledger_status', ['applied', 'manual-review']);
-export const enum_organizations_data_processing = pgEnum('enum_organizations_data_processing', ['pending', 'own']);
+export const enum_organizations_data_processing = pgEnum('enum_organizations_data_processing', [
+  'pending',
+  'own',
+  'scc',
+  'not_required',
+]);
 export const enum_organization_members_role = pgEnum('enum_organization_members_role', ['owner', 'admin', 'member']);
+export const enum_data_access_log_viewed_collection = pgEnum('enum_data_access_log_viewed_collection', [
+  'transactions',
+  'apps',
+  'webhook-deliveries',
+  'webhook-endpoints',
+  'outbox_events',
+  'app-invoices',
+]);
+export const enum_data_access_log_operation = pgEnum('enum_data_access_log_operation', ['list', 'record']);
+export const enum_access_reviews_findings_severity = pgEnum('enum_access_reviews_findings_severity', [
+  'high',
+  'medium',
+]);
+export const enum_access_reviews_server_sessions_reason = pgEnum('enum_access_reviews_server_sessions_reason', [
+  'migration',
+  'restore',
+  'incident',
+  'admin_cannot',
+]);
+export const enum_access_reviews_status = pgEnum('enum_access_reviews_status', ['collecting', 'ready', 'confirmed']);
 export const enum_webhook_endpoints_events = pgEnum('enum_webhook_endpoints_events', [
   '*',
   'transaction:success',
@@ -363,6 +388,8 @@ export const organizations = pgTable(
     quotaUsed: numeric('quota_used', { mode: 'number' }).notNull().default(0),
     rpsForever: boolean('rps_forever').default(true),
     dataProcessing: enum_organizations_data_processing('data_processing').default('pending'),
+    intakeClosesAt: timestamp('intake_closes_at', { mode: 'string', withTimezone: true, precision: 3 }),
+    keepWebhookResponses: boolean('keep_webhook_responses').default(true),
     updatedAt: timestamp('updated_at', { mode: 'string', withTimezone: true, precision: 3 }).defaultNow().notNull(),
     createdAt: timestamp('created_at', { mode: 'string', withTimezone: true, precision: 3 }).defaultNow().notNull(),
   },
@@ -458,6 +485,104 @@ export const deleted_organization_members = pgTable(
     index('deleted_organization_members_deleted_at_idx').on(columns.deletedAt),
     index('deleted_organization_members_updated_at_idx').on(columns.updatedAt),
     index('deleted_organization_members_created_at_idx').on(columns.createdAt),
+  ],
+);
+
+export const data_access_log = pgTable(
+  'data_access_log',
+  {
+    id: varchar('id').primaryKey(),
+    viewedAt: timestamp('viewed_at', { mode: 'string', withTimezone: true, precision: 3 }).notNull(),
+    user: varchar('user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    userEmail: varchar('user_email').notNull(),
+    viewedCollection: enum_data_access_log_viewed_collection('viewed_collection').notNull(),
+    operation: enum_data_access_log_operation('operation').notNull(),
+    records: jsonb('records'),
+    total: numeric('total', { mode: 'number' }),
+  },
+  (columns) => [
+    index('data_access_log_viewed_at_idx').on(columns.viewedAt),
+    index('data_access_log_user_idx').on(columns.user),
+    index('data_access_log_viewed_collection_idx').on(columns.viewedCollection),
+  ],
+);
+
+export const access_reviews_findings = pgTable(
+  'access_reviews_findings',
+  {
+    _order: integer('_order').notNull(),
+    _parentID: varchar('_parent_id').notNull(),
+    id: varchar('id').primaryKey(),
+    at: timestamp('at', { mode: 'string', withTimezone: true, precision: 3 }),
+    severity: enum_access_reviews_findings_severity('severity'),
+    rule: varchar('rule'),
+    detail: varchar('detail'),
+  },
+  (columns) => [
+    index('access_reviews_findings_order_idx').on(columns._order),
+    index('access_reviews_findings_parent_id_idx').on(columns._parentID),
+    foreignKey({
+      columns: [columns['_parentID']],
+      foreignColumns: [access_reviews.id],
+      name: 'access_reviews_findings_parent_id_fk',
+    }).onDelete('cascade'),
+  ],
+);
+
+export const access_reviews_server_sessions = pgTable(
+  'access_reviews_server_sessions',
+  {
+    _order: integer('_order').notNull(),
+    _parentID: varchar('_parent_id').notNull(),
+    id: varchar('id').primaryKey(),
+    startedAt: timestamp('started_at', { mode: 'string', withTimezone: true, precision: 3 }).notNull(),
+    user: varchar('user'),
+    method: varchar('method'),
+    keyFingerprint: varchar('key_fingerprint'),
+    auto: boolean('auto').default(false),
+    reason: enum_access_reviews_server_sessions_reason('reason'),
+    readData: varchar('read_data'),
+  },
+  (columns) => [
+    index('access_reviews_server_sessions_order_idx').on(columns._order),
+    index('access_reviews_server_sessions_parent_id_idx').on(columns._parentID),
+    foreignKey({
+      columns: [columns['_parentID']],
+      foreignColumns: [access_reviews.id],
+      name: 'access_reviews_server_sessions_parent_id_fk',
+    }).onDelete('cascade'),
+  ],
+);
+
+export const access_reviews = pgTable(
+  'access_reviews',
+  {
+    id: varchar('id').primaryKey(),
+    periodFrom: timestamp('period_from', { mode: 'string', withTimezone: true, precision: 3 }).notNull(),
+    periodTo: timestamp('period_to', { mode: 'string', withTimezone: true, precision: 3 }).notNull(),
+    status: enum_access_reviews_status('status').default('confirmed'),
+    sources: varchar('sources').default('Data Access Log · SSH sign-ins of the servers · reverse-proxy log (7 days)'),
+    collected: jsonb('collected'),
+    collectedUntil: timestamp('collected_until', { mode: 'string', withTimezone: true, precision: 3 }),
+    result: varchar('result'),
+    confirmed: boolean('confirmed'),
+    reviewer: varchar('reviewer_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    reviewerEmail: varchar('reviewer_email'),
+    reviewedAt: timestamp('reviewed_at', { mode: 'string', withTimezone: true, precision: 3 }),
+    updatedAt: timestamp('updated_at', { mode: 'string', withTimezone: true, precision: 3 }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { mode: 'string', withTimezone: true, precision: 3 }).defaultNow().notNull(),
+  },
+  (columns) => [
+    index('access_reviews_period_from_idx').on(columns.periodFrom),
+    index('access_reviews_status_idx').on(columns.status),
+    index('access_reviews_reviewer_idx').on(columns.reviewer),
+    index('access_reviews_reviewed_at_idx').on(columns.reviewedAt),
+    index('access_reviews_updated_at_idx').on(columns.updatedAt),
+    index('access_reviews_created_at_idx').on(columns.createdAt),
   ],
 );
 
@@ -670,6 +795,8 @@ export const payload_locked_documents_rels = pgTable(
     'deleted-accountsID': varchar('deleted_accounts_id'),
     'deleted-organizationsID': varchar('deleted_organizations_id'),
     'deleted-organization-membersID': varchar('deleted_organization_members_id'),
+    'data-access-logID': varchar('data_access_log_id'),
+    'access-reviewsID': varchar('access_reviews_id'),
     'webhook-endpointsID': varchar('webhook_endpoints_id'),
     'webhook-deliveriesID': varchar('webhook_deliveries_id'),
     outbox_eventsID: integer('outbox_events_id'),
@@ -689,6 +816,8 @@ export const payload_locked_documents_rels = pgTable(
     index('payload_locked_documents_rels_deleted_accounts_id_idx').on(columns['deleted-accountsID']),
     index('payload_locked_documents_rels_deleted_organizations_id_idx').on(columns['deleted-organizationsID']),
     index('payload_locked_documents_rels_deleted_organization_membe_idx').on(columns['deleted-organization-membersID']),
+    index('payload_locked_documents_rels_data_access_log_id_idx').on(columns['data-access-logID']),
+    index('payload_locked_documents_rels_access_reviews_id_idx').on(columns['access-reviewsID']),
     index('payload_locked_documents_rels_webhook_endpoints_id_idx').on(columns['webhook-endpointsID']),
     index('payload_locked_documents_rels_webhook_deliveries_id_idx').on(columns['webhook-deliveriesID']),
     index('payload_locked_documents_rels_outbox_events_id_idx').on(columns.outbox_eventsID),
@@ -743,6 +872,16 @@ export const payload_locked_documents_rels = pgTable(
       columns: [columns['deleted-organization-membersID']],
       foreignColumns: [deleted_organization_members.id],
       name: 'payload_locked_documents_rels_deleted_organization_member_fk',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [columns['data-access-logID']],
+      foreignColumns: [data_access_log.id],
+      name: 'payload_locked_documents_rels_data_access_log_fk',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [columns['access-reviewsID']],
+      foreignColumns: [access_reviews.id],
+      name: 'payload_locked_documents_rels_access_reviews_fk',
     }).onDelete('cascade'),
     foreignKey({
       columns: [columns['webhook-endpointsID']],
@@ -929,6 +1068,40 @@ export const relations_organization_members = relations(organization_members, ({
 export const relations_deleted_accounts = relations(deleted_accounts, () => ({}));
 export const relations_deleted_organizations = relations(deleted_organizations, () => ({}));
 export const relations_deleted_organization_members = relations(deleted_organization_members, () => ({}));
+export const relations_data_access_log = relations(data_access_log, ({ one }) => ({
+  user: one(users, {
+    fields: [data_access_log.user],
+    references: [users.id],
+    relationName: 'user',
+  }),
+}));
+export const relations_access_reviews_findings = relations(access_reviews_findings, ({ one }) => ({
+  _parentID: one(access_reviews, {
+    fields: [access_reviews_findings._parentID],
+    references: [access_reviews.id],
+    relationName: 'findings',
+  }),
+}));
+export const relations_access_reviews_server_sessions = relations(access_reviews_server_sessions, ({ one }) => ({
+  _parentID: one(access_reviews, {
+    fields: [access_reviews_server_sessions._parentID],
+    references: [access_reviews.id],
+    relationName: 'serverSessions',
+  }),
+}));
+export const relations_access_reviews = relations(access_reviews, ({ one, many }) => ({
+  findings: many(access_reviews_findings, {
+    relationName: 'findings',
+  }),
+  serverSessions: many(access_reviews_server_sessions, {
+    relationName: 'serverSessions',
+  }),
+  reviewer: one(users, {
+    fields: [access_reviews.reviewer],
+    references: [users.id],
+    relationName: 'reviewer',
+  }),
+}));
 export const relations_webhook_endpoints_events = relations(webhook_endpoints_events, ({ one }) => ({
   parent: one(webhook_endpoints, {
     fields: [webhook_endpoints_events.parent],
@@ -1035,6 +1208,16 @@ export const relations_payload_locked_documents_rels = relations(payload_locked_
     references: [deleted_organization_members.id],
     relationName: 'deleted-organization-members',
   }),
+  'data-access-logID': one(data_access_log, {
+    fields: [payload_locked_documents_rels['data-access-logID']],
+    references: [data_access_log.id],
+    relationName: 'data-access-log',
+  }),
+  'access-reviewsID': one(access_reviews, {
+    fields: [payload_locked_documents_rels['access-reviewsID']],
+    references: [access_reviews.id],
+    relationName: 'access-reviews',
+  }),
   'webhook-endpointsID': one(webhook_endpoints, {
     fields: [payload_locked_documents_rels['webhook-endpointsID']],
     references: [webhook_endpoints.id],
@@ -1098,6 +1281,11 @@ type DatabaseSchema = {
   enum_quota_usage_ledger_status: typeof enum_quota_usage_ledger_status;
   enum_organizations_data_processing: typeof enum_organizations_data_processing;
   enum_organization_members_role: typeof enum_organization_members_role;
+  enum_data_access_log_viewed_collection: typeof enum_data_access_log_viewed_collection;
+  enum_data_access_log_operation: typeof enum_data_access_log_operation;
+  enum_access_reviews_findings_severity: typeof enum_access_reviews_findings_severity;
+  enum_access_reviews_server_sessions_reason: typeof enum_access_reviews_server_sessions_reason;
+  enum_access_reviews_status: typeof enum_access_reviews_status;
   enum_webhook_endpoints_events: typeof enum_webhook_endpoints_events;
   enum_outbox_events_status: typeof enum_outbox_events_status;
   enum_app_invoices_status: typeof enum_app_invoices_status;
@@ -1116,6 +1304,10 @@ type DatabaseSchema = {
   deleted_accounts: typeof deleted_accounts;
   deleted_organizations: typeof deleted_organizations;
   deleted_organization_members: typeof deleted_organization_members;
+  data_access_log: typeof data_access_log;
+  access_reviews_findings: typeof access_reviews_findings;
+  access_reviews_server_sessions: typeof access_reviews_server_sessions;
+  access_reviews: typeof access_reviews;
   webhook_endpoints_events: typeof webhook_endpoints_events;
   webhook_endpoints: typeof webhook_endpoints;
   webhook_deliveries: typeof webhook_deliveries;
@@ -1142,6 +1334,10 @@ type DatabaseSchema = {
   relations_deleted_accounts: typeof relations_deleted_accounts;
   relations_deleted_organizations: typeof relations_deleted_organizations;
   relations_deleted_organization_members: typeof relations_deleted_organization_members;
+  relations_data_access_log: typeof relations_data_access_log;
+  relations_access_reviews_findings: typeof relations_access_reviews_findings;
+  relations_access_reviews_server_sessions: typeof relations_access_reviews_server_sessions;
+  relations_access_reviews: typeof relations_access_reviews;
   relations_webhook_endpoints_events: typeof relations_webhook_endpoints_events;
   relations_webhook_endpoints: typeof relations_webhook_endpoints;
   relations_webhook_deliveries: typeof relations_webhook_deliveries;

@@ -51,6 +51,7 @@ services:
     volumes:
       - ./config/traefik/traefik.yml:/traefik.yml:ro
       - traefik_auth:/auth:ro
+      - traefik_logs:/var/log/traefik
     depends_on:
       traefik-init:
         condition: service_completed_successfully
@@ -62,6 +63,30 @@ services:
     labels:
       - 'traefik.enable=true'
       - 'traefik.http.middlewares.basic-auth.basicauth.usersfile=/auth/users.txt'
+    logging: *loki-logging
+
+  # The access log of Traefik (config/traefik/traefik.yml) lives at most 7 days: at midnight UTC the day's file is copied
+  # aside and emptied, and a copy is deleted once its last line is 6 days old. Traefik appends to the file, so it keeps
+  # writing after the file is emptied; Promtail starts again from its beginning
+  traefik-log-rotate:
+    image: httpd:2.4.67-alpine@sha256:0136c2d4462f3b8ecc92bea70efdfef4d06523999ae8d7aa533969dea6db4576
+    restart: unless-stopped
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -eu
+        cd /var/log/traefik
+        while true; do
+          find . -name 'access.log.*' -mmin +8640 -delete
+          now=$$(date -u +%s)
+          sleep $$(( (now / 86400 + 1) * 86400 - now ))
+          day=$$(date -u -d "@$$(( $$(date -u +%s) - 60 ))" +%F)
+          if [ -s access.log ]; then cp access.log "access.log.$$day" && : > access.log; fi
+        done
+    volumes:
+      - traefik_logs:/var/log/traefik
+    network_mode: none
     logging: *loki-logging
 
   postgresql-primary:
@@ -203,40 +228,6 @@ services:
     mem_limit: 512m
     logging: *loki-logging
 
-  pgadmin:
-    image: dpage/pgadmin4:9.15.0@sha256:cefc4cc6b7d9d71a9e81e76fb9d7e14038ab5661b539a190eea1b63fa612589a
-    restart: unless-stopped
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
-      PGADMIN_LISTEN_PORT: 80
-      PGADMIN_SERVER_JSON_FILE: /tmp/servers.json
-      PG_USER: ${PG_USER}
-      PG_PASSWORD: ${PG_PASSWORD}
-      PG_DB: ${PG_DB}
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    entrypoint: /bin/sh
-    command:
-      - -c
-      - |
-        printf '{"Servers":{"1":{"Name":"Quasar Primary","Group":"Servers","Host":"postgresql-primary","Port":5432,"MaintenanceDB":"%s","Username":"%s","PassFile":"/tmp/pgpass","SSLMode":"prefer"},"2":{"Name":"Quasar Standby","Group":"Servers","Host":"postgresql-standby","Port":5432,"MaintenanceDB":"%s","Username":"%s","PassFile":"/tmp/pgpass","SSLMode":"prefer"}}}' "$${PG_DB}" "$${PG_USER}" "$${PG_DB}" "$${PG_USER}" > /tmp/servers.json
-        printf 'postgresql-primary:5432:%s:%s:%s\npostgresql-standby:5432:%s:%s:%s\n' "$${PG_DB}" "$${PG_USER}" "$${PG_PASSWORD}" "$${PG_DB}" "$${PG_USER}" "$${PG_PASSWORD}" > /tmp/pgpass
-        chmod 600 /tmp/pgpass
-        /entrypoint.sh
-    depends_on:
-      postgresql-primary:
-        condition: service_healthy
-    networks:
-      - backend_net
-      - public_net
-    labels:
-      - 'traefik.enable=true'
-      - 'traefik.docker.network=public_net'
-      - 'traefik.http.services.pgadmin.loadbalancer.server.port=80'
-      - 'traefik.http.routers.pgadmin.middlewares=basic-auth@docker'
-    logging: *loki-logging
-
   pg-backup:
     image: eeshugerman/postgres-backup-s3:16@sha256:cfcaa57732c13d0724312a2eea1ad3e385f5ed049de3c626d1ef28ecc13cdddb
     restart: unless-stopped
@@ -254,7 +245,8 @@ services:
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
       S3_BUCKET: ${S3_BUCKET_POSTGRES}
       S3_PREFIX: 'backup'
-      PASSPHRASE: ${PG_BACKUP_PASSPHRASE}
+      # The dumps leave the server only encrypted (GPG): no deploy without the passphrase
+      PASSPHRASE: ${PG_BACKUP_PASSPHRASE:?PG_BACKUP_PASSPHRASE must be set}
     volumes:
       - ./scripts/restore_backup.sh:/restore.sh:ro
     depends_on:
@@ -635,26 +627,6 @@ services:
     mem_limit: 512m
     logging: *loki-logging
 
-  redisinsight:
-    image: redis/redisinsight:3.4.2@sha256:85562d67a9128ac7f764bb3d1ac909fcf77708c7c8f55bd1605a85b3c4becc83
-    restart: unless-stopped
-    environment:
-      RI_PROXY_PATH: /
-    volumes:
-      - redisinsight_data:/data
-    depends_on:
-      - redis-api-node-1
-      - redis-ui-node-1
-    networks:
-      - public_net
-      - backend_net
-    labels:
-      - 'traefik.enable=true'
-      - 'traefik.docker.network=public_net'
-      - 'traefik.http.services.redisinsight.loadbalancer.server.port=5540'
-      - 'traefik.http.routers.redisinsight.middlewares=basic-auth@docker'
-    logging: *loki-logging
-
   quasar-app:
     build:
       context: ..
@@ -685,6 +657,8 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       DATABASE_URL_READ: ${DATABASE_URL_READ}
       INTERNAL_ENGINE_URL: ${INTERNAL_ENGINE_URL:-http://quasar-nest-api:3001}
+      # The collector of the weekly access review reads the proxy and SSH logs here
+      LOKI_URL: ${LOKI_URL:-http://loki:3100}
     read_only: true
     tmpfs:
       - /tmp
@@ -709,8 +683,12 @@ services:
       retries: 5
       start_period: 60s
     networks:
-      - backend_net
-      - public_net
+      backend_net:
+        # The engine calls the dashboard by this name (DASHBOARD_INTERNAL_URL): unlike quasar-app it exists only on
+        # backend_net, so it never resolves to the dashboard of another stack on public_net
+        aliases:
+          - quasar-dashboard
+      public_net: {}
     deploy:
       resources:
         limits:
@@ -739,6 +717,9 @@ services:
       DATABASE_URL_READ: ${DATABASE_URL_READ}
       ENABLE_WORKERS: 'false'
       PIMLICO_API_KEY: ${PIMLICO_API_KEY:-}
+      # The internal routes of the dashboard, inside this network: its public URL sits behind the proxy password on
+      # staging and goes out through the CDN in production
+      DASHBOARD_INTERNAL_URL: ${DASHBOARD_INTERNAL_URL:-http://quasar-dashboard:3000}
     read_only: true
     tmpfs:
       - /tmp
@@ -790,6 +771,9 @@ services:
       DATABASE_URL_READ: ${DATABASE_URL_READ}
       ENABLE_WORKERS: 'true'
       PIMLICO_API_KEY: ${PIMLICO_API_KEY:-}
+      # The internal routes of the dashboard, inside this network: its public URL sits behind the proxy password on
+      # staging and goes out through the CDN in production
+      DASHBOARD_INTERNAL_URL: ${DASHBOARD_INTERNAL_URL:-http://quasar-dashboard:3000}
     read_only: true
     tmpfs:
       - /tmp
@@ -862,6 +846,8 @@ services:
       - '--storage.tsdb.retention.size=10GB'
     volumes:
       - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # prometheus.yml loads its alerts from here: without the file Prometheus starts with no rule and no alert fires
+      - ./config/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
       - prometheus_data:/prometheus
     extra_hosts:
       - 'host.docker.internal:host-gateway'
@@ -892,7 +878,8 @@ services:
       resources:
         limits:
           cpus: '0.5'
-          memory: 512M
+          # 512M was not enough on staging: Prometheus was killed by the OOM killer and crash-looped replaying its WAL
+          memory: 1G
     logging: *loki-logging
 
   grafana:
@@ -1001,8 +988,14 @@ services:
       - DOCKER_HOST=tcp://docker-proxy:2375
     volumes:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      # The system journal of the host, for the SSH sign-ins that the access review checks
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
       - ./config/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
       - promtail_data:/data
+      # The access log of Traefik
+      - traefik_logs:/var/log/traefik:ro
     command: -config.file=/etc/promtail/config.yml
     networks:
       - backend_net
@@ -1200,6 +1193,7 @@ services:
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      ALERTMANAGER_HEARTBEAT_URL: ${ALERTMANAGER_HEARTBEAT_URL:-}
     volumes:
       - ./config/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml.template:ro
     entrypoint: /bin/sh
@@ -1211,15 +1205,24 @@ services:
           NOTIFY_CONFIGS="$$NOTIFY_CONFIGS$$(printf '\n    discord_configs:\n      - webhook_url: "%s"\n        send_resolved: true' "$$DISCORD_WEBHOOK_URL")"
         fi
         if [ -n "$$TELEGRAM_BOT_TOKEN" ] && [ -n "$$TELEGRAM_CHAT_ID" ]; then
-          NOTIFY_CONFIGS="$$NOTIFY_CONFIGS$$(printf '\n    telegram_configs:\n      - bot_token: "%s"\n        chat_id: "%s"\n        send_resolved: true' "$$TELEGRAM_BOT_TOKEN" "$$TELEGRAM_CHAT_ID")"
+          # Alertmanager reads chat_id as a number (a channel's is negative): quoted, it refuses the whole config
+          case "$$TELEGRAM_CHAT_ID" in
+            *[!0-9-]*) echo "[Alertmanager] FATAL: TELEGRAM_CHAT_ID must be a numeric chat ID." >&2; exit 1 ;;
+          esac
+          NOTIFY_CONFIGS="$$NOTIFY_CONFIGS$$(printf '\n    telegram_configs:\n      - bot_token: "%s"\n        chat_id: %s\n        send_resolved: true' "$$TELEGRAM_BOT_TOKEN" "$$TELEGRAM_CHAT_ID")"
         fi
         if [ -z "$$NOTIFY_CONFIGS" ]; then
           echo "[Alertmanager] FATAL: set DISCORD_WEBHOOK_URL and/or TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID." >&2
           exit 1
         fi
+        HEARTBEAT_CONFIGS=""
+        if [ -n "$$ALERTMANAGER_HEARTBEAT_URL" ]; then
+          HEARTBEAT_CONFIGS="$$(printf '\n    webhook_configs:\n      - url: "%s"\n        send_resolved: false' "$$ALERTMANAGER_HEARTBEAT_URL")"
+        fi
         while IFS= read -r line || [ -n "$$line" ]; do
           case "$$line" in
             *__NOTIFY_RECEIVER_CONFIGS__*) printf '%s\n' "$$NOTIFY_CONFIGS" ;;
+            *__HEARTBEAT_RECEIVER_CONFIGS__*) printf '%s\n' "$$HEARTBEAT_CONFIGS" ;;
             *) printf '%s\n' "$$line" ;;
           esac
         done < /etc/alertmanager/alertmanager.yml.template > /tmp/alertmanager.yml
@@ -1249,10 +1252,10 @@ networks:
 
 volumes:
   traefik_auth:
+  traefik_logs:
   pg_primary_data:
   pg_standby_data:
   pg_backups:
-  pgadmin_data:
   redis_api_data_1:
   redis_api_data_2:
   redis_api_data_3:
@@ -1261,7 +1264,6 @@ volumes:
   redis_api_data_6:
   redis_ui_data_1:
   redis_ui_data_2:
-  redisinsight_data:
   prometheus_data:
   grafana_data:
   loki_data:

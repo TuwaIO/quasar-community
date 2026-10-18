@@ -1,4 +1,5 @@
 import { getSolanaChainId } from '@tuwaio/sdk/orbit';
+import { encrypt } from '@tuwaio/shared/encryption';
 import { createPartitionSql, monthlyPartition, type PartitionedTable } from '@tuwaio/shared/partitions';
 import { inArray, sql } from 'drizzle-orm';
 import type { Payload } from 'payload';
@@ -132,6 +133,21 @@ const transactionUpdates = Object.fromEntries(
 );
 
 /**
+ * The row a transaction record is written as: the chain ID as the engine stores it, and the keys sent with the
+ * transaction encrypted with this node's key, as the engine keeps them (the export carries them in plain text).
+ */
+export function transactionRowFrom(row: TransactionRecord) {
+  return {
+    ...row,
+    // One chain ID per Solana cluster, as the engine stores it
+    chainId: row.adapter === 'solana' ? (getSolanaChainId(row.chainId) ?? row.chainId) : row.chainId,
+    bundlerUrl: row.bundlerUrl ? encrypt(row.bundlerUrl) : null,
+    pimlicoApiKey: row.pimlicoApiKey ? encrypt(row.pimlicoApiKey) : null,
+    rpcUrl: null,
+  };
+}
+
+/**
  * Inserts transactions, or updates those the node has already imported when the export has a newer version of them
  * (`updated_at`). The engine's webhooks and hooks do not run: history is not delivered again.
  */
@@ -142,11 +158,7 @@ export async function writeTransactions(db: Db, batch: TransactionRecord[], ensu
     batch.map((row) => row.createdAt),
     ensured,
   );
-  const values = batch.map((row) => ({
-    ...row,
-    // One chain ID per Solana cluster, as the engine stores it
-    chainId: row.adapter === 'solana' ? (getSolanaChainId(row.chainId) ?? row.chainId) : row.chainId,
-  }));
+  const values = batch.map(transactionRowFrom);
 
   // Which rows exist already, so the report can tell inserts from updates: RETURNING cannot read `xmax` on a
   // partitioned table

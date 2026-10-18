@@ -89,6 +89,18 @@ export const POST = withRateLimit(async (req: Request) => {
     } catch (error: unknown) {
       const message = getErrorMessage(error);
 
+      // Payload checks the confirmation only after the password: whoever sees this knows the password already
+      if (error instanceof Error && error.name === 'UnverifiedEmail') {
+        authAttemptsTotal?.inc({ status: 'failure' });
+        return NextResponse.json(
+          {
+            error: 'Confirm your email first: open the link we sent to it when you signed up, then sign in again.',
+            code: 'email_unverified',
+          },
+          { status: 403 },
+        );
+      }
+
       if (message === '2FA_REQUIRED') {
         const userLookup = await payload.find({
           collection: 'users',

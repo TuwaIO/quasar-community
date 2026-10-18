@@ -31,14 +31,6 @@ ingress:
   - hostname: grafana.${DOMAIN}
     service: http://traefik:80
 
-  # Database Administration Panel (pgAdmin protected by Traefik basic-auth)
-  - hostname: pgadmin.${DOMAIN}
-    service: http://traefik:80
-
-  # Cache Administration Panel (RedisInsight protected by Traefik basic-auth)
-  - hostname: redis.${DOMAIN}
-    service: http://traefik:80
-
   # Traefik dashboard (protected by Traefik basic-auth)
   - hostname: traefik.${DOMAIN}
     service: http://traefik:80

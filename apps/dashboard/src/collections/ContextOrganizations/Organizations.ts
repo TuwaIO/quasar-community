@@ -1,6 +1,7 @@
 import { DATA_PROCESSING } from '@tuwaio/shared/constants';
 import { createId } from '@tuwaio/shared/cuid';
 import type { CollectionConfig } from 'payload';
+import { APIError } from 'payload';
 
 import {
   COMMUNITY_WORKSPACE_QUOTA_BALANCE,
@@ -55,7 +56,9 @@ export const Organizations: CollectionConfig = {
     beforeChange: [
       async ({ data, req, operation }) => {
         if (operation === 'create') {
-          const userId = req.user?.id;
+          // System creations (the seed, an import, the Personal Workspace of a new account) skip the limits of the
+          // signed-in person: a system admin who creates an account in the admin panel is not its owner
+          const userId = req.context?.skipAuthCheck ? undefined : req.user?.id;
 
           // Allow system/seed to create without user context, otherwise enforce
           if (!userId && !req.user && !req.context?.skipAuthCheck) throw new Error('Authentication required');
@@ -103,11 +106,21 @@ export const Organizations: CollectionConfig = {
         }
         return data;
       },
+      // The statuses that open the intake after an agreement are set only by the data transfer workflow, with its
+      // records; field access lets a system admin through, so the hook guards them
+      ({ data, originalDoc, req }) => {
+        const next = data?.dataProcessing;
+        const byWorkflow = [DATA_PROCESSING.SCC, DATA_PROCESSING.NOT_REQUIRED] as string[];
+        if (next && next !== originalDoc?.dataProcessing && byWorkflow.includes(next) && !req.context?.dataTransfer) {
+          throw new APIError('Only the data transfer workflow sets this status.', 403);
+        }
+        return data;
+      },
     ],
     afterChange: [
       async ({ doc, operation, previousDoc, req }) => {
-        // Auto-create owner membership
-        if (operation === 'create' && req.user?.id) {
+        // Auto-create owner membership; a system creation names its owner itself
+        if (operation === 'create' && req.user?.id && !req.context?.skipAuthCheck) {
           // Prevent recursion if this was triggered internally
           // Check if member already exists (double safety)
           const exists = await req.payload.find({
@@ -382,6 +395,8 @@ export const Organizations: CollectionConfig = {
       options: [
         { label: 'Pending: transactions are refused', value: DATA_PROCESSING.PENDING },
         { label: 'Own organization of the operator', value: DATA_PROCESSING.OWN },
+        { label: 'Standard contractual clauses signed by both parties', value: DATA_PROCESSING.SCC },
+        { label: 'Clauses not needed (reviewed)', value: DATA_PROCESSING.NOT_REQUIRED },
       ],
       access: {
         create: isAdminFieldLevel,
@@ -394,6 +409,43 @@ export const Organizations: CollectionConfig = {
           'Whether the apps of this organization may send transactions. Pending until the organization concludes the ' +
           'Data Processing Addendum, and the standard contractual clauses where they apply. Set "Own organization" ' +
           'only for organizations of the operator itself, which controls their data.',
+      },
+    },
+    {
+      // When a version of the Data Processing Addendum that the organization has not accepted takes effect; the engine
+      // refuses its transactions from that time (apps/server/src/common/data-processing.ts). Written by the server
+      // only, when a version is decided and when an owner accepts, so nobody sets it through the API.
+      name: 'intakeClosesAt',
+      type: 'date',
+      access: {
+        create: () => false,
+        update: () => false,
+      },
+      admin: {
+        position: 'sidebar',
+        readOnly: true,
+        condition: () => EDITION === 'cloud',
+        date: { pickerAppearance: 'dayAndTime' },
+        description:
+          'Set when a new version of the Data Processing Addendum that needs acceptance is decided, and cleared when ' +
+          'an owner accepts it. From this time the apps of the organization cannot send transactions.',
+      },
+    },
+    {
+      name: 'keepWebhookResponses',
+      type: 'checkbox',
+      defaultValue: true,
+      access: {
+        create: () => false,
+        update: () => false,
+      },
+      admin: {
+        position: 'sidebar',
+        readOnly: true,
+        condition: () => EDITION === 'cloud',
+        description:
+          'Whether the engine keeps the bodies of the responses of this organization’s webhook endpoints (up to ' +
+          '1,000 characters, 3 months). Off when the clauses in force allow only the status of each response to be kept.',
       },
     },
   ],

@@ -7,7 +7,8 @@
 
 | Service | Image | Purpose |
 |---|---|---|
-| **Traefik** | `traefik:v3.6.x` | Reverse proxy, routing |
+| **Traefik** | `traefik:v3.6.x` | Reverse proxy, routing; writes the access log to the `traefik_logs` volume |
+| **Traefik log rotation** (`traefik-log-rotate`) | `httpd:2.4.x-alpine` (BusyBox shell only) | At 00:00 UTC copies the day's access log aside and empties it; deletes copies whose last line is 6 days old, so no request is kept longer than 7 days |
 | **PostgreSQL Primary/Standby** | `quasar/postgresql-repmgr:16` | HA Database cluster with Repmgr |
 | **PgBouncer** | `edoburu/pgbouncer:latest` | Connection pooling for Postgres |
 | **Redis API Cluster** | `redis:7-alpine` | 6-node Redis cluster (`noeviction`, AOF) for BullMQ & EngineGuard |
@@ -16,14 +17,12 @@
 | **Quasar NestJS** | Custom (NestJS 12 + Fastify) | High-performance hot-path microservice |
 | **Prometheus** | `prom/prometheus:v3.3.x` | Metrics collection (30-day retention) |
 | **Loki** | `grafana/loki:3.6.x` | Log aggregation (7-day retention) |
-| **Promtail** | `grafana/promtail:latest` | Log shipper (Docker → Loki) |
+| **Promtail** | `grafana/promtail:latest` | Log shipper (container logs, Traefik access log and host journal → Loki) |
 | **Grafana 11** | `grafana/grafana:11.6.x` | Dashboards, alerting |
 | **Node Exporter** | `prom/node-exporter:latest` | Host-level metrics |
 | **cAdvisor** | `gcr.io/cadvisor/cadvisor:latest` | Container-level metrics |
 | **Postgres Exporter** | `prometheuscommunity/postgres-exporter:v0.16.x` | PostgreSQL metrics |
 | **pg-backup** | `eeshugerman/postgres-backup-s3:16` | Scheduled Postgres dumps → S3/R2 |
-| **pgAdmin** | `dpage/pgadmin4` | PostgreSQL management UI |
-| **RedisInsight** | `redis/redisinsight:latest` | Redis browser UI |
 
 ---
 
@@ -113,7 +112,6 @@ cp .env.example .env
 | `TRAEFIK_USER` / `TRAEFIK_PASSWORD`         | Traefik dashboard BasicAuth credentials      |
 | `PG_USER` / `PG_PASSWORD` / `PG_DB`         | PostgreSQL credentials                       |
 | `REDIS_API_PASSWORD` / `REDIS_UI_PASSWORD` | API Redis and UI Redis AUTH passwords       |
-| `PGADMIN_EMAIL` / `PGADMIN_PASSWORD`        | pgAdmin login                                |
 | `GF_ADMIN_USER` / `GF_ADMIN_PASSWORD`       | Grafana admin credentials                    |
 | `DISCORD_WEBHOOK_URL`                       | Discord channel webhook for ops alerts (Grafana + Alertmanager) |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`   | Telegram bot token + chat ID for ops alerts (Grafana + Alertmanager) |
@@ -124,6 +122,7 @@ cp .env.example .env
 | `WALG_S3_PREFIX`                             | Dedicated encrypted WAL-G archive prefix     |
 | `WALG_LIBSODIUM_KEY`                         | Base64-encoded 32-byte WAL-G encryption key  |
 | `WALG_RETAIN_FULL_BACKUPS`                   | Number of verified full backups to retain    |
+| `PG_BACKUP_PASSPHRASE`                       | GPG passphrase of the daily dumps; required: the deploy stops without it, so no dump leaves the server unencrypted |
 | `NEXT_PUBLIC_SERVER_URL`                    | Public-facing app URL                        |
 | `PAYLOAD_SECRET`                            | Payload CMS encryption key                   |
 | `INTERNAL_SECRET`                           | Bootstrap-only internal-auth secret (minimum 32 random characters); active/previous rotation keys are managed in API Redis |
@@ -174,8 +173,6 @@ All services are routed through **Cloudflare Tunnel → Traefik**.
 | **Quasar Dashboard (UI/Auth)** | `https://quasar.${DOMAIN}` | `web` (80)         | Cloudflare Edge |
 | **Quasar Engine (API)** | `https://api.${DOMAIN}`     | `web` (80)         | Cloudflare Edge |
 | **Traefik Dashboard** | `https://traefik.${DOMAIN}` | `web` (80)         | Cloudflare Edge |
-| **pgAdmin**           | `https://pgadmin.${DOMAIN}` | `web` (80)         | Cloudflare Edge |
-| **RedisInsight**      | `https://redis.${DOMAIN}`   | `web` (80)         | Cloudflare Edge |
 | **Grafana**           | `https://grafana.${DOMAIN}` | `web` (80)         | Cloudflare Edge |
 
 > [!NOTE]
@@ -249,7 +246,7 @@ For each hostname, use the HTTP service type and the Docker service origin:
 - **URL:** `traefik:80`
 - **No TLS verification:** Cloudflare terminates HTTPS at the edge and the tunnel connects to Traefik over HTTP.
 
-Required production hostnames are `quasar`, `api`, `traefik`, `pgadmin`, `redis`, and `grafana`. Staging uses the corresponding `*-stg` hostnames.
+Required production hostnames are `quasar`, `api`, `traefik` and `grafana`. Staging uses the corresponding `*-stg` hostnames.
 
 Do not use `localhost:80` here: inside the `cloudflared` container, `localhost` means the cloudflared container itself, not Traefik.
 
@@ -413,6 +410,7 @@ docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compo
 **Destination:** Cloudflare R2 (`S3_REGION=auto`).
 **Schedule:** Configurable via `PG_BACKUP_SCHEDULE` env var (default: `@daily`).
 **Retention:** `PG_BACKUP_KEEP_DAYS` (default: `7`).
+**Encryption:** GPG with `PG_BACKUP_PASSPHRASE`, which Compose requires.
 
 ### WAL-G Continuous Archiving
 
@@ -562,13 +560,12 @@ All persistent data lives in named Docker volumes. Destroying volumes means data
 | ------------------- | -------------------- | -------------------------------------------------- |
 | `pg_data`           | PostgreSQL           | Database files                                     |
 | `pg_backups`        | pg-backup            | Local dump cache                                   |
-| `pgadmin_data`      | pgAdmin              | Sessions & config                                  |
 | `redis_data_1` to `6`| Redis Cluster Nodes | RDB snapshots & appendonly files per node          |
-| `redisinsight_data` | RedisInsight         | UI state                                           |
 | `prometheus_data`   | Prometheus           | TSDB metrics (30d retention)                       |
 | `grafana_data`      | Grafana              | Users, stars, preferences, plugins (dashboards come from code) |
 | `loki_data`         | Loki                 | Log chunks                                         |
 | `traefik_auth`      | Traefik              | Generated BasicAuth credentials                    |
+| `traefik_logs`      | Traefik, Traefik log rotation, Promtail (read-only) | Traefik access log, kept at most 7 days |
 
 ---
 
@@ -581,11 +578,17 @@ All services are routed through Traefik via Docker labels. Subdomains are derive
 | Quasar Dashboard (UI/Auth) | `https://quasar.${DOMAIN}`                       |
 | Quasar Engine (API) | `https://api.${DOMAIN}`                             |
 | Traefik Dashboard | `https://traefik.${DOMAIN}` (BasicAuth)           |
-| pgAdmin           | `https://pgadmin.${DOMAIN}`                       |
-| RedisInsight      | `https://redis.${DOMAIN}`                         |
 | Grafana           | `https://grafana.${DOMAIN}`                       |
 | Prometheus        | Internal only (`prometheus:9090` on `backend_net`) |
 | Loki              | Internal only (`loki:3100` on `backend_net`)       |
+
+### Database and Redis access
+
+There is no web UI for PostgreSQL or Redis: the data of customers is read in the Payload admin panel, which records each view of it. For the rare work the admin panel cannot do, sign in to the server over SSH with your key:
+
+- PostgreSQL: `docker exec -it "$(docker ps -q --filter label=com.docker.compose.service=postgresql-primary)" psql -U "$PG_USER" "$PG_DB"`. For a desktop client, open a tunnel with `ssh -L 5432:127.0.0.1:5432 <server>` (PostgreSQL listens only on `127.0.0.1:5432` in production) and connect the client to `localhost:5432`.
+- Redis: `redis-cli` inside the `redis-ui-node-1` or `redis-api-node-1` container, with the AUTH password from `.env`.
+- Backups: `infra/scripts/test_remote_backup_restore.sh` restores the latest dump from R2 into an isolated database on the server. Check backups there; do not download dumps.
 
 ---
 

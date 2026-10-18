@@ -22,7 +22,7 @@ concurrency:
 jobs:
   test:
     name: Lint, Typecheck, Test & Secret Scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -85,7 +85,7 @@ jobs:
 
   semgrep-security-scan:
     name: Semgrep Security Scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     container:
       image: semgrep/semgrep:1.157.0
     steps:

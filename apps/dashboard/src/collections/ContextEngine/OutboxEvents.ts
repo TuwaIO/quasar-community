@@ -1,7 +1,13 @@
 import type { CollectionConfig } from 'payload';
 
+import { recordDataAccess } from '@/lib/dataAccess';
+
 export const OutboxEvents: CollectionConfig = {
   slug: 'outbox_events',
+  hooks: {
+    // Each view of this customer data in the admin panel is recorded
+    afterOperation: [recordDataAccess('outbox_events')],
+  },
   disableDuplicate: true,
   admin: {
     useAsTitle: 'eventType',

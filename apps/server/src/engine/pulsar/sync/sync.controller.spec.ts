@@ -1,6 +1,7 @@
 import { getQueueToken } from '@nestjs/bullmq';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { decrypt } from '@tuwaio/shared/encryption';
 import { getToken } from '@willsoto/nestjs-prometheus';
 import { Queue } from 'bullmq';
 import { Counter } from 'prom-client';
@@ -119,6 +120,47 @@ describe('SyncController (Payments Logic)', () => {
     );
     expect(mockInsertChain.values).not.toHaveBeenCalled();
     expect(fastQueue.add).not.toHaveBeenCalled();
+  });
+
+  // Endpoints and keys sent with a transaction are the customer's credentials: the RPC endpoint is never used (the app's
+  // own settings are), a bundler URL and a Pimlico key are kept only encrypted, like the keys in the app's settings
+  it('stores no RPC endpoint and only encrypted bundler URLs and Pimlico keys sent with a transaction', async () => {
+    vi.stubEnv('ENCRYPTION_KEY', 'ab'.repeat(32));
+    db.select.mockReturnValue({
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([]),
+    });
+    const mockInsertChain = { values: vi.fn().mockResolvedValue({}) };
+    db.insert.mockReturnValue(mockInsertChain);
+    const { req, res } = createMockContext();
+
+    await controller.syncTransaction(
+      {
+        adapter: 'evm',
+        txKey: '0x456',
+        chainId: 1,
+        connectorType: 'metamask',
+        from: '0xabc',
+        pending: true,
+        localTimestamp: Date.now(),
+        tracker: 'ethereum',
+        type: 'transfer',
+        rpcUrl: 'https://rpc.example.com/v2/secret-rpc-key',
+        bundlerUrl: 'https://bundler.example.com/rpc?apikey=secret-bundler-key',
+        pimlicoApiKey: 'pim_secret',
+      },
+      req as any,
+      res as any,
+    );
+
+    const stored = mockInsertChain.values.mock.calls[0][0];
+    expect(stored.rpcUrl).toBeNull();
+    expect(stored.bundlerUrl).toMatch(/^qenc:/);
+    expect(stored.pimlicoApiKey).toMatch(/^qenc:/);
+    expect(decrypt(stored.bundlerUrl)).toBe('https://bundler.example.com/rpc?apikey=secret-bundler-key');
+    expect(decrypt(stored.pimlicoApiKey)).toBe('pim_secret');
+    vi.unstubAllEnvs();
   });
 
   it('should sync basic app transaction and NOT queue AML check', async () => {
@@ -527,6 +569,7 @@ describe('SyncController (Payments Logic)', () => {
   });
 
   it('should sync ERC-4337 UserOperation with bundlerUrl and pimlicoApiKey and tag ecosystem as ERC4337', async () => {
+    vi.stubEnv('ENCRYPTION_KEY', 'ab'.repeat(32));
     const mockSelectChain = {
       from: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
@@ -562,19 +605,15 @@ describe('SyncController (Payments Logic)', () => {
     const result = await controller.syncTransaction(body, req as any, res as any);
 
     expect(result.success).toBe(true);
-    expect(insertedValues).toEqual(
-      expect.objectContaining({
-        txKey: '0xuserop123',
-        tracker: 'erc4337',
-        bundlerUrl: 'https://api.pimlico.io/v2/8453/rpc?apikey=test',
-        pimlicoApiKey: 'test-pimlico-key',
-      }),
-    );
+    expect(insertedValues).toEqual(expect.objectContaining({ txKey: '0xuserop123', tracker: 'erc4337' }));
+    expect(decrypt(insertedValues.bundlerUrl)).toBe('https://api.pimlico.io/v2/8453/rpc?apikey=test');
+    expect(decrypt(insertedValues.pimlicoApiKey)).toBe('test-pimlico-key');
     expect(txCounter.inc).toHaveBeenCalledWith({
       ecosystem: 'ERC4337',
       chainId: '8453',
       status: 'Pending',
     });
+    vi.unstubAllEnvs();
   });
 
   it.each([

@@ -41,7 +41,7 @@
 #
 # Optional:
 #   TUNNEL_NAME             default: quasar-<domain with dots as dashes>
-#   TUNNEL_HOSTNAMES        default: "quasar api grafana pgadmin redis"
+#   TUNNEL_HOSTNAMES        default: "quasar api grafana"
 #
 # Usage:
 #   ./scripts/setup-cloudflare-tunnel.sh            # create/update
@@ -87,7 +87,7 @@ fi
 : "${DOMAIN:?DOMAIN must be set (e.g. example.com)}"
 
 TUNNEL_NAME="${TUNNEL_NAME:-quasar-${DOMAIN//./-}}"
-TUNNEL_HOSTNAMES="${TUNNEL_HOSTNAMES:-quasar api grafana pgadmin redis}"
+TUNNEL_HOSTNAMES="${TUNNEL_HOSTNAMES:-quasar api grafana}"
 # Split once into an array rather than relying on implicit word splitting.
 read -ra HOSTS <<< "$TUNNEL_HOSTNAMES"
 [[ ${#HOSTS[@]} -gt 0 ]] || die "TUNNEL_HOSTNAMES is empty."

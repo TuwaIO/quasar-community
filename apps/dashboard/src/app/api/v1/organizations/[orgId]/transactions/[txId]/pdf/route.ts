@@ -8,6 +8,7 @@ import path from 'path';
 import transactionTemplate from '@/constants/transaction-receipt-template.json';
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccessOrSystemAdmin } from '@/lib/auth-utils';
+import { recordAdminView } from '@/lib/dataAccess';
 import { formatChainId } from '@/lib/formatChainId';
 import { formatTimestamp } from '@/lib/formatTimestamp';
 import type { Transaction } from '@/payload-types';
@@ -39,6 +40,8 @@ export const GET = withRateLimit(
 
       const access = await verifyOrgAccessOrSystemAdmin(payload, user, orgId, ['owner', 'admin', 'member']);
       if (access instanceof NextResponse) return access;
+      // A system admin opens customer data here past access control: the view is recorded
+      await recordAdminView(payload, { user, collection: 'transactions', id: txId });
 
       const transaction = await payload.findByID({
         collection: 'transactions',

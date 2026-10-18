@@ -172,7 +172,7 @@ the end for you to paste back into `.env`.
 ### Option B — by hand
 
 In the Cloudflare Zero Trust dashboard: create a tunnel, point every public
-hostname (`quasar`, `api`, `grafana`, `pgadmin`, `redis` — or whichever subset
+hostname (`quasar`, `api`, `grafana` — or whichever subset
 you expose — under your domain) at the HTTP service `traefik:80`, and put the
 tunnel token in `.env`:
 
@@ -256,7 +256,8 @@ self-registration or email-based password reset to fall back on.
 ```bash
 docker compose ps cloudflared traefik   # if you configured a tunnel
 docker compose logs --tail=100 cloudflared
-docker compose logs --tail=100 traefik
+docker compose logs --tail=100 traefik   # Traefik's own warnings and errors
+docker compose exec traefik-log-rotate tail -n 20 /var/log/traefik/access.log   # the requests, kept 7 days
 curl -I https://api.<your-domain>/v1/engine/monitoring/health
 ```
 
@@ -297,7 +298,8 @@ When deploying pre-built, signed container images from GitHub Container Registry
 ```bash
 $COMPOSE up -d prometheus grafana loki promtail node-exporter cadvisor \
   postgres-exporter-primary postgres-exporter-standby \
-  redis-exporter-api redis-exporter-ui pgbouncer-exporter blackbox-exporter alertmanager
+  redis-exporter-api redis-exporter-ui pgbouncer-exporter blackbox-exporter alertmanager \
+  traefik-log-rotate
 ```
 
 Grafana is reachable at `https://grafana.<your-domain>` (behind Traefik

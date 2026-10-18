@@ -43,7 +43,7 @@ export const isAdminOrSelf: Access = ({ req: { user } }) => {
  * Request-cached utility to fetch all organization memberships of a user.
  * Bypasses the 1000 limit entirely via pagination: false.
  */
-async function getUserMemberships(req: any, payload: any, userId: string): Promise<any[]> {
+export async function getUserMemberships(req: any, payload: any, userId: string): Promise<any[]> {
   if (!req.userMemberships) {
     const res = await payload.find({
       collection: 'organization-members',

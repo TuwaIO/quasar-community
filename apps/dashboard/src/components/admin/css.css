@@ -15,6 +15,21 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * The sign-in page of the admin panel (CustomLogin) is built with the dashboard's Tailwind classes, but without the
+ * preflight above its buttons kept the browser's own border, background and padding (the 2px outset border around
+ * Authenticate). Reset them in the base layer, so the utility classes of each button still win.
+ */
+@layer base {
+  .tuwa-admin-login button {
+    border: 0 solid;
+    background-color: transparent;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+  }
+}
+
 @theme {
   --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
 }

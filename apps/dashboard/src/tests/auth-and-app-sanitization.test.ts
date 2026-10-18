@@ -208,5 +208,20 @@ describe('Auth Security and App Response Sanitization', () => {
       const data = await res.json();
       expect(data.error).toBe('Invalid email or password');
     });
+
+    // Payload checks the confirmation only after the password, so saying so tells nothing to someone without it
+    it('login tells a person with the right password that the email is not confirmed yet', async () => {
+      mockLogin.mockRejectedValue(Object.assign(new Error('Please verify your email.'), { name: 'UnverifiedEmail' }));
+
+      const req = new Request('http://localhost/api/v1/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: 'new@example.com', password: 'right' }),
+      });
+      const res = await loginPost(req);
+      expect(res.status).toBe(403);
+      const data = await res.json();
+      expect(data).toMatchObject({ code: 'email_unverified' });
+      expect(data.error).toMatch(/^Confirm your email first/);
+    });
   });
 });

@@ -18,6 +18,8 @@ import { Redis } from 'ioredis';
 import { Counter, Histogram } from 'prom-client';
 import * as zlib from 'zlib';
 
+import { isDataIntakeOpen } from '../common/data-processing';
+import { EDITION } from '../common/edition';
 import { WEBHOOK_DELIVERY_METRIC, WEBHOOK_LATENCY_METRIC } from '../constants';
 import { DRIZZLE } from '../database/database.module';
 import * as schema from '../database/schema/index';
@@ -90,6 +92,15 @@ export interface WebhookRequestLimits {
   maxRedirects?: number;
 }
 
+/**
+ * What the delivery log keeps instead of the body of a response for an organization that keeps only the status of its
+ * webhook responses (`organizations.keep_webhook_responses`, set by the dashboard).
+ */
+export const RESPONSE_BODY_NOT_KEPT = 'Not kept: only the status of webhook responses is kept for this organization.';
+
+/** How long the processor reuses what it read of `organizations.keep_webhook_responses`. */
+const KEEP_RESPONSES_TTL_MS = 30_000;
+
 const MAX_WEBHOOK_BODY_LIMIT = 64 * 1024 * 1024;
 const MAX_WEBHOOK_TIMEOUT = 5 * 60 * 1000;
 
@@ -117,6 +128,7 @@ function envNumber(name: string, fallback: number): number {
 })
 export class WebhookProcessor extends WorkerHost {
   private readonly logger = new Logger(WebhookProcessor.name);
+  private readonly keepResponses = new Map<string, { keep: boolean; until: number }>();
 
   constructor(
     @Inject(DRIZZLE) private readonly db: NodePgDatabase<typeof schema>,
@@ -126,6 +138,38 @@ export class WebhookProcessor extends WorkerHost {
     @InjectMetric(WEBHOOK_LATENCY_METRIC) private readonly latencyHistogram: Histogram<string>,
   ) {
     super();
+  }
+
+  /**
+   * Whether the delivery log may keep the bodies of an organization's webhook responses. The dashboard turns it off for
+   * an organization whose data processing terms allow only the status of each response to be kept; while the intake of
+   * the organization is closed (`isDataIntakeOpen`), no body is kept either, only the status.
+   * Read from the database and reused for 30 seconds; a failed read, or an organization that is not found, keeps no
+   * body.
+   *
+   * @param organizationId - The organization of the endpoint.
+   */
+  async keepsResponseBodies(organizationId: string | null | undefined): Promise<boolean> {
+    if (!organizationId) return true;
+    const cached = this.keepResponses.get(organizationId);
+    if (cached && cached.until > Date.now()) return cached.keep;
+    try {
+      const organization = await this.db.query?.organizations?.findFirst?.({
+        where: eq(schema.organizations.id, organizationId),
+        columns: { keepWebhookResponses: true, dataProcessing: true, intakeClosesAt: true },
+      });
+      const keep =
+        !!organization &&
+        organization.keepWebhookResponses !== false &&
+        isDataIntakeOpen(EDITION, organization.dataProcessing, organization.intakeClosesAt);
+      this.keepResponses.set(organizationId, { keep, until: Date.now() + KEEP_RESPONSES_TTL_MS });
+      return keep;
+    } catch (err) {
+      this.logger.warn(
+        `[Webhook Processor] Could not read whether Org ${organizationId} keeps response bodies; keeping none: ${(err as Error).message}`,
+      );
+      return false;
+    }
   }
 
   async makeRequest(
@@ -485,6 +529,8 @@ export class WebhookProcessor extends WorkerHost {
     const startTime = Date.now();
     let httpStatus: number | undefined;
     let responseBody: string | undefined;
+    // Whether `responseBody` is what the endpoint answered, not a text of the engine
+    let fromEndpoint = false;
     let success = false;
 
     const allowInternal = this.configService.get<string>('ALLOW_INTERNAL_WEBHOOKS') === 'true';
@@ -532,6 +578,7 @@ export class WebhookProcessor extends WorkerHost {
         success = res.ok;
         const rawResponse = await res.text().catch(() => '');
         responseBody = rawResponse.length > 1000 ? rawResponse.substring(0, 1000) + '... (truncated)' : rawResponse;
+        fromEndpoint = true;
 
         if (!success) {
           this.logger.warn(
@@ -652,7 +699,10 @@ export class WebhookProcessor extends WorkerHost {
           }
         };
 
-        const safeResponseBody = sanitizeResponseBody(responseBody);
+        const safeResponseBody =
+          fromEndpoint && !(await this.keepsResponseBodies(endpoint.organizationId))
+            ? RESPONSE_BODY_NOT_KEPT
+            : sanitizeResponseBody(responseBody);
         const deliveryId = job.data.deliveryId;
 
         let existingDelivery;

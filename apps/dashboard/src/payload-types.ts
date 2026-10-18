@@ -76,6 +76,8 @@ export interface Config {
     'deleted-accounts': DeletedAccount;
     'deleted-organizations': DeletedOrganization;
     'deleted-organization-members': DeletedOrganizationMember;
+    'data-access-log': DataAccessLog;
+    'access-reviews': AccessReview;
     'webhook-endpoints': WebhookEndpoint;
     'webhook-deliveries': WebhookDelivery;
     outbox_events: OutboxEvent;
@@ -97,6 +99,8 @@ export interface Config {
     'deleted-accounts': DeletedAccountsSelect<false> | DeletedAccountsSelect<true>;
     'deleted-organizations': DeletedOrganizationsSelect<false> | DeletedOrganizationsSelect<true>;
     'deleted-organization-members': DeletedOrganizationMembersSelect<false> | DeletedOrganizationMembersSelect<true>;
+    'data-access-log': DataAccessLogSelect<false> | DataAccessLogSelect<true>;
+    'access-reviews': AccessReviewsSelect<false> | AccessReviewsSelect<true>;
     'webhook-endpoints': WebhookEndpointsSelect<false> | WebhookEndpointsSelect<true>;
     'webhook-deliveries': WebhookDeliveriesSelect<false> | WebhookDeliveriesSelect<true>;
     outbox_events: OutboxEventsSelect<false> | OutboxEventsSelect<true>;
@@ -362,7 +366,15 @@ export interface Organization {
   /**
    * Whether the apps of this organization may send transactions. Pending until the organization concludes the Data Processing Addendum, and the standard contractual clauses where they apply. Set "Own organization" only for organizations of the operator itself, which controls their data.
    */
-  dataProcessing?: ('pending' | 'own') | null;
+  dataProcessing?: ('pending' | 'own' | 'scc' | 'not_required') | null;
+  /**
+   * Set when a new version of the Data Processing Addendum that needs acceptance is decided, and cleared when an owner accepts it. From this time the apps of the organization cannot send transactions.
+   */
+  intakeClosesAt?: string | null;
+  /**
+   * Whether the engine keeps the bodies of the responses of this organization’s webhook endpoints (up to 1,000 characters, 3 months). Off when the clauses in force allow only the status of each response to be kept.
+   */
+  keepWebhookResponses?: boolean | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -655,6 +667,103 @@ export interface DeletedOrganizationMember {
   createdAt: string;
 }
 /**
+ * Read-only. One entry for each list or record of customer data opened in the admin panel: who, which collection and records, when. Kept for 1 year, then deleted. Reviewed every week (Access Reviews).
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "data-access-log".
+ */
+export interface DataAccessLog {
+  id: string;
+  viewedAt: string;
+  user?: (string | null) | User;
+  userEmail: string;
+  viewedCollection:
+    'transactions' | 'apps' | 'webhook-deliveries' | 'webhook-endpoints' | 'outbox_events' | 'app-invoices';
+  operation: 'list' | 'record';
+  /**
+   * The ids of the records shown, up to 100.
+   */
+  records?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * How many records the list had.
+   */
+  total?: number | null;
+}
+/**
+ * Every week: open the review of the week, give the reason of each SSH session and what you read, check the findings, write the result and confirm. A confirmed review cannot be changed.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "access-reviews".
+ */
+export interface AccessReview {
+  id: string;
+  periodFrom: string;
+  periodTo: string;
+  status?: ('collecting' | 'ready' | 'confirmed') | null;
+  sources?: string | null;
+  /**
+   * What the collector did not expect. Explain each finding in the result before you confirm.
+   */
+  findings?:
+    | {
+        at?: string | null;
+        severity?: ('high' | 'medium') | null;
+        rule?: string | null;
+        detail?: string | null;
+        id?: string | null;
+      }[]
+    | null;
+  /**
+   * Each SSH session of the period: the collector fills when, who and with which key; you give the reason and what you read. A session for another reason is not authorized: write in the result what happened and what you did about it.
+   */
+  serverSessions?:
+    | {
+        startedAt: string;
+        user?: string | null;
+        method?: string | null;
+        keyFingerprint?: string | null;
+        auto?: boolean | null;
+        reason?: ('migration' | 'restore' | 'incident' | 'admin_cannot') | null;
+        /**
+         * Which customer data you read or changed in the database, or "none".
+         */
+        readData?: string | null;
+        id?: string | null;
+      }[]
+    | null;
+  /**
+   * What the collector counted on each day of the period.
+   */
+  collected?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  collectedUntil?: string | null;
+  /**
+   * Who viewed what and why; anything unexplained and what you did about it.
+   */
+  result?: string | null;
+  confirmed?: boolean | null;
+  reviewer?: (string | null) | User;
+  reviewerEmail?: string | null;
+  reviewedAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * URLs the engine POSTs to when a tracked transaction of an app changes state. Each endpoint gets its own auto-generated signing secret, so the receiver can verify the payload came from Quasar. Every delivery attempt costs quota and is logged under Webhook Deliveries. Production requires HTTPS; one localhost endpoint per organization is allowed for local development.
  *
  * This interface was referenced by `Config`'s JSON-Schema
@@ -835,6 +944,14 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'deleted-organization-members';
         value: string | DeletedOrganizationMember;
+      } | null)
+    | ({
+        relationTo: 'data-access-log';
+        value: string | DataAccessLog;
+      } | null)
+    | ({
+        relationTo: 'access-reviews';
+        value: string | AccessReview;
       } | null)
     | ({
         relationTo: 'webhook-endpoints';
@@ -1063,6 +1180,8 @@ export interface OrganizationsSelect<T extends boolean = true> {
   quotaUsed?: T;
   rpsForever?: T;
   dataProcessing?: T;
+  intakeClosesAt?: T;
+  keepWebhookResponses?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -1113,6 +1232,61 @@ export interface DeletedOrganizationMembersSelect<T extends boolean = true> {
   user?: T;
   email?: T;
   deletedAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "data-access-log_select".
+ */
+export interface DataAccessLogSelect<T extends boolean = true> {
+  id?: T;
+  viewedAt?: T;
+  user?: T;
+  userEmail?: T;
+  viewedCollection?: T;
+  operation?: T;
+  records?: T;
+  total?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "access-reviews_select".
+ */
+export interface AccessReviewsSelect<T extends boolean = true> {
+  id?: T;
+  periodFrom?: T;
+  periodTo?: T;
+  status?: T;
+  sources?: T;
+  findings?:
+    | T
+    | {
+        at?: T;
+        severity?: T;
+        rule?: T;
+        detail?: T;
+        id?: T;
+      };
+  serverSessions?:
+    | T
+    | {
+        startedAt?: T;
+        user?: T;
+        method?: T;
+        keyFingerprint?: T;
+        auto?: T;
+        reason?: T;
+        readData?: T;
+        id?: T;
+      };
+  collected?: T;
+  collectedUntil?: T;
+  result?: T;
+  confirmed?: T;
+  reviewer?: T;
+  reviewerEmail?: T;
+  reviewedAt?: T;
   updatedAt?: T;
   createdAt?: T;
 }

@@ -23,6 +23,12 @@ scrape_configs:
   - job_name: 'cadvisor'
     static_configs:
       - targets: ['cadvisor:8080']
+    # Only the cAdvisor series the rules and dashboards read. Every other one is multiplied by each container (rolling
+    # deploys, one-off migration runs) and pushed Prometheus past its memory limit on staging (OOM loop, 2026-10-18)
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'container_(cpu_usage_seconds_total|cpu_user_seconds_total|cpu_system_seconds_total|memory_rss|memory_working_set_bytes|memory_cache|memory_usage_bytes|spec_memory_limit_bytes|oom_events_total|network_receive_bytes_total|network_transmit_bytes_total|fs_reads_bytes_total|fs_writes_bytes_total|last_seen)|machine_.+|cadvisor_version_info'
+        action: keep
 
   - job_name: 'traefik'
     static_configs:
@@ -68,6 +74,9 @@ scrape_configs:
     metrics_path: '/metrics'
     docker_sd_configs:
       - host: http://docker-proxy:2375
+        # Containers come and go on each deploy: a removed one must leave the targets well within the 1 minute
+        # of InstanceDown (the default of 60 s kept scraping it and fired the alert on every rollout)
+        refresh_interval: 15s
     relabel_configs:
       - source_labels: [__meta_docker_container_label_com_docker_compose_service]
         regex: 'quasar-nest-api|quasar-worker'
@@ -87,6 +96,9 @@ scrape_configs:
     metrics_path: '/api/metrics'
     docker_sd_configs:
       - host: http://docker-proxy:2375
+        # Containers come and go on each deploy: a removed one must leave the targets well within the 1 minute
+        # of InstanceDown (the default of 60 s kept scraping it and fired the alert on every rollout)
+        refresh_interval: 15s
     relabel_configs:
       - source_labels: [__meta_docker_container_label_com_docker_compose_service]
         regex: 'quasar-app'

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { HIDDEN_TRANSACTION_KEYS } from '@/collections/ContextTransactions/Transactions';
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccess } from '@/lib/auth-utils';
 
@@ -24,6 +25,7 @@ export const GET = withRateLimit(
         id: txId,
         depth: 1,
         overrideAccess: true,
+        select: HIDDEN_TRANSACTION_KEYS,
         context: { skipOwnerFilter: true },
       });
 

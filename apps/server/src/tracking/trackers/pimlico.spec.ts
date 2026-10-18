@@ -29,10 +29,9 @@ vi.mock('viem/actions', () => ({
   getBlock: vi.fn().mockResolvedValue({ timestamp: 1700000000n }),
 }));
 
-// `enc:` marks a stored URL the tracker decrypts to plain text; other values keep the old
-// `decrypted_` marker so the key assertions stay readable.
+// `enc:` marks a stored value the tracker decrypts; like the real decrypt, a value without the marker is returned as it is
 vi.mock('@tuwaio/shared/encryption', () => ({
-  decrypt: vi.fn((val: string) => (val.startsWith('enc:') ? val.slice(4) : `decrypted_${val}`)),
+  decrypt: vi.fn((val: string) => (val.startsWith('enc:') ? val.slice(4) : val)),
 }));
 
 vi.mock('@wagmi/core', () => ({
@@ -63,7 +62,7 @@ describe('processPimlicoTx', () => {
       limit: vi.fn().mockResolvedValue([
         {
           id: 'app-1',
-          pimlicoApiKey: 'encrypted_key',
+          pimlicoApiKey: 'enc:app-pimlico-key',
           alchemyApiKey: null,
           infuraApiKey: null,
         },
@@ -191,7 +190,7 @@ describe('processPimlicoTx', () => {
 
 describe('processPimlicoTx outbound URL checks', () => {
   const hash = '0x3333333333333333333333333333333333333333333333333333333333333333';
-  const PIMLICO_WITH_APP_KEY = 'https://api.pimlico.io/v2/8453/rpc?apikey=decrypted_encrypted_key';
+  const PIMLICO_WITH_APP_KEY = 'https://api.pimlico.io/v2/8453/rpc?apikey=app-pimlico-key';
 
   function dnsAnswers(table: Record<string, string[]>) {
     const pick = (host: string, v6: boolean) => (table[host] ?? []).filter((a) => a.includes(':') === v6);
@@ -226,7 +225,7 @@ describe('processPimlicoTx outbound URL checks', () => {
     const { processPimlicoTx: freshProcess } = await import('./pimlico');
     return async (
       txExtra: Record<string, unknown> = {},
-      app: Record<string, unknown> = { id: 'app-1', pimlicoApiKey: 'encrypted_key' },
+      app: Record<string, unknown> = { id: 'app-1', pimlicoApiKey: 'enc:app-pimlico-key' },
       rpcConfigs: { rpcUrl: string }[] = [],
     ): Promise<{ bundlerUrl: string; rpcUrls: string[] }> => {
       mocks.http.mockClear();
@@ -329,10 +328,21 @@ describe('processPimlicoTx outbound URL checks', () => {
       vi.stubEnv('ALCHEMY_API_KEY_FALLBACK', 'system-key');
       const { rpcUrls } = await track(
         {},
-        { id: 'app-1', pimlicoApiKey: 'encrypted_key', alchemyApiKey: 'enc:app-key' },
+        { id: 'app-1', pimlicoApiKey: 'enc:app-pimlico-key', alchemyApiKey: 'enc:app-key' },
       );
       expect(rpcUrls).toEqual(['https://base-mainnet.g.alchemy.com/v2/app-key']);
     });
+  });
+
+  // Sync stores a bundler URL and a Pimlico key sent with a transaction encrypted
+  it('decrypts the Pimlico key stored with the transaction', async () => {
+    const { bundlerUrl } = await track({ pimlicoApiKey: 'enc:tx-pimlico-key' }, { id: 'app-1' });
+    expect(bundlerUrl).toBe('https://api.pimlico.io/v2/8453/rpc?apikey=tx-pimlico-key');
+  });
+
+  it('decrypts the bundler URL stored with the transaction', async () => {
+    const { bundlerUrl } = await track({ bundlerUrl: 'enc:https://bundler.customer.example/rpc' }, { id: 'app-1' });
+    expect(bundlerUrl).toBe('https://bundler.customer.example/rpc');
   });
 
   it('passes a public client bundler URL through to stage 1', async () => {
@@ -394,7 +404,7 @@ describe('processPimlicoTx outbound URL checks', () => {
       {},
       {
         id: 'app-1',
-        pimlicoApiKey: 'encrypted_key',
+        pimlicoApiKey: 'enc:app-pimlico-key',
         quickNodeApiKey: 'enc:token',
         quickNodeAppName: '169.254.169.254#',
       },
@@ -414,7 +424,7 @@ describe('processPimlicoTx outbound URL checks', () => {
         {},
         {
           id: 'app-1',
-          pimlicoApiKey: 'encrypted_key',
+          pimlicoApiKey: 'enc:app-pimlico-key',
           alchemyApiKey: 'enc:app-key',
           quickNodeApiKey: 'enc:token',
           quickNodeAppName: 'my-app',
@@ -435,12 +445,22 @@ describe('processPimlicoTx outbound URL checks', () => {
       const run = await freshTracker();
       const first = await run(
         {},
-        { id: 'app-1', pimlicoApiKey: 'encrypted_key', quickNodeApiKey: `enc:${QUICKNODE}`, quickNodeAppName: 'x' },
+        {
+          id: 'app-1',
+          pimlicoApiKey: 'enc:app-pimlico-key',
+          quickNodeApiKey: `enc:${QUICKNODE}`,
+          quickNodeAppName: 'x',
+        },
         [{ rpcUrl: `enc:${OVERRIDE}` }],
       );
       const second = await run(
         {},
-        { id: 'app-2', pimlicoApiKey: 'encrypted_key', quickNodeApiKey: `enc:${OVERRIDE}`, quickNodeAppName: 'x' },
+        {
+          id: 'app-2',
+          pimlicoApiKey: 'enc:app-pimlico-key',
+          quickNodeApiKey: `enc:${OVERRIDE}`,
+          quickNodeAppName: 'x',
+        },
         [{ rpcUrl: `enc:${QUICKNODE}` }],
       );
       expect(first.rpcUrls).toEqual([OVERRIDE, QUICKNODE, PUBLIC_FALLBACK]);

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { HIDDEN_TRANSACTION_KEYS } from '@/collections/ContextTransactions/Transactions';
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccess } from '@/lib/auth-utils';
 import { parsePagination } from '@/lib/pagination';
@@ -60,6 +61,7 @@ export const GET = withRateLimit(async (req: Request, { params }: { params: Prom
       sort: '-localTimestamp',
       depth: 1,
       overrideAccess: true,
+      select: HIDDEN_TRANSACTION_KEYS,
       context: { skipOwnerFilter: true },
     });
 

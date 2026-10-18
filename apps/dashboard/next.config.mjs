@@ -1,10 +1,12 @@
 import { withSentryConfig } from '@sentry/nextjs/config';
 import { withPayload } from '@payloadcms/next/withPayload';
+import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const { monacoCdn, monacoLoaderFiles } = createRequire(import.meta.url)('./scripts/monaco-local-loader.cjs');
 
 // The workspace .env, for `next dev` and `next build` on a host. Variables already set win, and in containers, which
 // get their environment from Compose, there is no file. Node's own loader: the `dotenv` package (18+) would also
@@ -27,6 +29,16 @@ const nextConfig = {
     // CI builds the image on a fresh runner, so the Turbopack build cache is never read there: writing it took more
     // than a minute and gigabytes of memory on the 7 GB runners. Local builds start from scratch too.
     turbopackFileSystemCacheForBuild: false,
+  },
+  turbopack: {
+    rules: {
+      // The admin panel loads Monaco, the code editor of JSON and code fields, from this site (public/monaco/vs), not
+      // from jsDelivr: the loader rewrites the address in the client code of @payloadcms/ui and @monaco-editor/loader
+      '*.js': {
+        condition: { all: ['foreign', { path: monacoLoaderFiles }, { content: monacoCdn }] },
+        loaders: [path.resolve(__dirname, 'scripts/monaco-local-loader.cjs')],
+      },
+    },
   },
   images: {
     remotePatterns: [

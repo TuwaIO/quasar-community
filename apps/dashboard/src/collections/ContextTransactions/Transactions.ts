@@ -13,6 +13,7 @@ import type { CollectionConfig, Field, FieldAccess, PayloadRequest } from 'paylo
 import { isHex } from 'viem';
 
 import { isAdmin } from '@/lib/access';
+import { recordDataAccess } from '@/lib/dataAccess';
 import { getInternalSecret } from '@/lib/redis';
 import { ProxyMetadata } from '@/lib/types';
 import type { App, Organization } from '@/payload-types';
@@ -207,6 +208,15 @@ const immutableField: FieldAccess = ({ doc }) => {
   return false; // ⛔️ Updates FORBIDDEN (No Admin Bypass)
 };
 
+/**
+ * An RPC endpoint, a bundler URL and a Pimlico key that an app may send with a transaction are the customer's
+ * credentials: the engine keeps the last two encrypted and stores no RPC endpoint, and nobody reads them back here.
+ */
+const hiddenKey: FieldAccess = () => false;
+
+/** Leaves those keys out where a route reads transactions with `overrideAccess`, which skips field access. */
+export const HIDDEN_TRANSACTION_KEYS = { rpcUrl: false, bundlerUrl: false, pimlicoApiKey: false } as const;
+
 // ---------------------------------------------------------------------------
 // 4. Collection Config
 // ---------------------------------------------------------------------------
@@ -324,7 +334,7 @@ const coreFields: Field[] = [
   { name: F.payload, type: 'json', label: 'Payload', validate: () => true },
   { name: F.confirmations, type: 'text' },
   { name: F.requiredConfirmations, type: 'number' },
-  { name: F.rpcUrl, type: 'text' },
+  { name: F.rpcUrl, type: 'text', access: { read: hiddenKey } },
 
   // --- Payments App Kind Fields ---
   {
@@ -379,8 +389,8 @@ const evmFields: Field[] = [
   { name: F.maxFeePerGas, type: 'text' },
   { name: F.maxPriorityFeePerGas, type: 'text' },
   { name: F.replacedTxHash, type: 'text' },
-  { name: F.bundlerUrl, type: 'text' },
-  { name: F.pimlicoApiKey, type: 'text' },
+  { name: F.bundlerUrl, type: 'text', access: { read: hiddenKey } },
+  { name: F.pimlicoApiKey, type: 'text', access: { read: hiddenKey } },
 ];
 
 const solanaFields: Field[] = [
@@ -456,6 +466,8 @@ export const Transactions: CollectionConfig = {
     delete: () => false,
   },
   hooks: {
+    // Each view of this customer data in the admin panel is recorded
+    afterOperation: [recordDataAccess('transactions')],
     beforeOperation: [
       async ({ args, operation, req }) => {
         // --- READ ---

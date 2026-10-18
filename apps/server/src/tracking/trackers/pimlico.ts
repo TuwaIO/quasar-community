@@ -17,6 +17,7 @@ import { areSystemProviderKeysEnabled, isPublicRpcFallbackEnabled } from '../../
 import { getAlchemyKey } from '../../constants';
 import * as schema from '../../database/schema/index';
 import { alchemyNetworkMap } from '../../lib/generated/alchemyNetworkMap';
+import { trackingLagSeconds } from './lag';
 import { isUsableRpcUrl } from './rpc-guard';
 
 /** Maximum number of cached Wagmi configs. Prevents unbounded memory growth in long-running pods. */
@@ -67,6 +68,7 @@ export async function processPimlicoTx(
 ) {
   const chainId = Number(tx.chainId);
   const appId = tx.appId;
+  const trackingStartedAt = Date.now();
 
   if (!appId) {
     throw new Error(`[PIMLICO TRACKER] Missing appId for tx ${tx.txKey}.`);
@@ -83,8 +85,12 @@ export async function processPimlicoTx(
 
   // 3. Resolve Pimlico credentials
   const evmTx = tx as unknown as EvmTransaction;
+  // Sync stores a Pimlico key and a bundler URL sent with the transaction encrypted (older records hold plain text,
+  // which decrypt returns as it is)
+  const txPimlicoApiKey = evmTx.pimlicoApiKey ? decrypt(evmTx.pimlicoApiKey) : '';
+  const txBundlerUrl = evmTx.bundlerUrl ? decrypt(evmTx.bundlerUrl) : '';
   const pimlicoApiKey =
-    evmTx.pimlicoApiKey ||
+    txPimlicoApiKey ||
     (app?.pimlicoApiKey ? decrypt(app.pimlicoApiKey) : '') ||
     (areSystemProviderKeysEnabled() ? process.env.PIMLICO_API_KEY : '') ||
     '';
@@ -92,8 +98,8 @@ export async function processPimlicoTx(
   // A bundler URL from the sync request body replaces the Pimlico endpoint, so it passes the same
   // outbound check as an App RPC override. A rejected one falls back to Pimlico.
   const clientBundlerUrl =
-    evmTx.bundlerUrl && (await isUsableRpcUrl(evmTx.bundlerUrl, '[PIMLICO TRACKER]', 'Client Bundler'))
-      ? evmTx.bundlerUrl
+    txBundlerUrl && (await isUsableRpcUrl(txBundlerUrl, '[PIMLICO TRACKER]', 'Client Bundler'))
+      ? txBundlerUrl
       : undefined;
 
   // Without a key or a bundler URL, createPimlicoRpcUrl falls back to Pimlico's public endpoint:
@@ -228,8 +234,7 @@ export async function processPimlicoTx(
           const redisConf = await redis.get(redisKey);
           const confirmations = redisConf ? parseInt(redisConf, 10) : undefined;
 
-          const lagMs = Math.max(0, Date.now() - timestamp * 1000);
-          const lagSeconds = lagMs / 1000;
+          const lagSeconds = trackingLagSeconds(timestamp * 1000, trackingStartedAt);
 
           lagGauge.set({ ecosystem: 'ERC4337', chainId: String(chainId) }, lagSeconds);
           txCounter.inc({ ecosystem: 'ERC4337', chainId: String(chainId), status });

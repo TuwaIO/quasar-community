@@ -13,4 +13,11 @@ export const selectedOrgStorage = {
   remove: (userId: string): void => {
     if (typeof window !== 'undefined') window.localStorage.removeItem(keyFor(userId));
   },
+  /** Forgets the last organization of every account: it lasts only as long as a sign-in (Cookie Policy). */
+  clearAll: (): void => {
+    if (typeof window === 'undefined') return;
+    Object.keys(window.localStorage)
+      .filter((key) => key.startsWith(STORAGE_PREFIX))
+      .forEach((key) => window.localStorage.removeItem(key));
+  },
 };

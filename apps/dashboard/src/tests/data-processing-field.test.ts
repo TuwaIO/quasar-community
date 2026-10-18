@@ -51,7 +51,12 @@ describe('Organizations: data processing status', () => {
     expect(field?.type).toBe('select');
     expect(field?.defaultValue).toBe(DATA_PROCESSING.PENDING);
     expect(field?.required).toBe(true);
-    expect(field?.options.map((option) => option.value)).toEqual([DATA_PROCESSING.PENDING, DATA_PROCESSING.OWN]);
+    expect(field?.options.map((option) => option.value)).toEqual([
+      DATA_PROCESSING.PENDING,
+      DATA_PROCESSING.OWN,
+      DATA_PROCESSING.SCC,
+      DATA_PROCESSING.NOT_REQUIRED,
+    ]);
   });
 
   it.each(['create', 'update'] as const)('lets only a system admin set it on %s', async (operation) => {
@@ -149,5 +154,59 @@ describe('Organizations: data processing status', () => {
     await seedWorkspace(payload as any, { id: 'u_admin' });
 
     expect(payload.update).not.toHaveBeenCalled();
+  });
+});
+
+// When a version of the DPA that the organization has not accepted takes effect: the engine refuses its transactions
+// from that time. Only the server computes it, when a version is decided and when an owner accepts.
+describe('Organizations: when the intake closes', () => {
+  const closes = Organizations.fields.find((f) => 'name' in f && f.name === 'intakeClosesAt') as
+    | { type: string; access: { create: FieldAccessFn; update: FieldAccessFn }; admin: { readOnly?: boolean } }
+    | undefined;
+
+  it.each(['create', 'update'] as const)(
+    'is a date nobody sets through the API on %s, not even a system admin',
+    async (operation) => {
+      expect(closes?.type).toBe('date');
+      expect(closes?.admin.readOnly).toBe(true);
+      expect(await closes!.access[operation]({ req: { user: admin } })).toBe(false);
+    },
+  );
+});
+
+// `scc` and `not_required` mean that the clauses were signed by both parties or that TUWA decided they are not needed:
+// only the data transfer workflow sets them, with its records; a system admin cannot open the intake by hand
+describe('Organizations: statuses set by the data transfer workflow', () => {
+  const beforeChange = Organizations.hooks!.beforeChange!;
+  const run = async (data: Record<string, unknown>, context: Record<string, unknown>) => {
+    let out: unknown = data;
+    for (const hook of beforeChange) {
+      out = await (hook as (args: unknown) => unknown)({
+        operation: 'update',
+        data: out,
+        originalDoc: { id: 'org_1', dataProcessing: DATA_PROCESSING.PENDING },
+        req: { user: admin, context, payload: {} },
+      });
+    }
+    return out;
+  };
+
+  it.each([DATA_PROCESSING.SCC, DATA_PROCESSING.NOT_REQUIRED])(
+    'refuses %s set by hand, even by a system admin',
+    async (status) => {
+      await expect(run({ dataProcessing: status }, {})).rejects.toThrow(/Only the data transfer workflow/);
+    },
+  );
+
+  it('lets the workflow set them', async () => {
+    await expect(run({ dataProcessing: DATA_PROCESSING.SCC }, { dataTransfer: true })).resolves.toMatchObject({
+      dataProcessing: DATA_PROCESSING.SCC,
+    });
+  });
+
+  it('still lets a system admin mark an organization of the operator', async () => {
+    await expect(run({ dataProcessing: DATA_PROCESSING.OWN }, {})).resolves.toMatchObject({
+      dataProcessing: DATA_PROCESSING.OWN,
+    });
   });
 });

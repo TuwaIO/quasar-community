@@ -5,6 +5,9 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [react(), tsconfigPaths()],
+  // CSS modules (components/ui/CheckboxField.module.css) load without the Tailwind PostCSS plugin of Next.js, which
+  // the tests do not need and Vite cannot load from postcss.config.mjs
+  css: { postcss: { plugins: [] } },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

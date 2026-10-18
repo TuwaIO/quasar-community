@@ -159,6 +159,8 @@ describe('Webhook Localhost Policy & Error Formatting', () => {
       const data = await response.json();
       expect(data.id).toBe('wh_1');
       expect(data.url).toBe('http://localhost:3000/api/webhooks/quasar');
+      // Without a transaction type the endpoint receives every type, as in the collection (an empty one is invalid)
+      expect(mockCreate.mock.calls[0][0].data.txType).toBe('*');
     });
 
     it('POST should reject a 2nd localhost webhook in the same org with 400 Bad Request', async () => {

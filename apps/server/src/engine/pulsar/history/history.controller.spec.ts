@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { describe, expect, it, vi } from 'vitest';
@@ -81,6 +82,31 @@ describe('HistoryController', () => {
 
     const { params } = new PgDialect().sqlToQuery(calls.where!);
     expect(params).toEqual(expect.arrayContaining(['solana:devnet', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1']));
+  });
+
+  // The history holds the data of every user of the app: a public key (`pk_`, shown in the dashboard and fit for a
+  // browser) must not read it, only the secret key the app's server keeps
+  it('refuses a public key', async () => {
+    const { db } = makeDb();
+    const controller = new HistoryController(db as any);
+
+    await expect(
+      controller.getHistory({}, { engineMeta: { ...req.engineMeta, credentialType: 'public' } }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(db.select).not.toHaveBeenCalled();
+  });
+
+  it('returns the fields of the transactions, not the keys sent with them or internal IDs', async () => {
+    const { db } = makeDb();
+    const controller = new HistoryController(db as any);
+
+    await controller.getHistory({}, { engineMeta: { ...req.engineMeta, credentialType: 'secret' } });
+
+    const fields = Object.keys((db.select.mock.calls as unknown as [Record<string, unknown>][])[0][0] ?? {});
+    expect(fields).toEqual(expect.arrayContaining(['txKey', 'from', 'hash', 'status', 'title', 'payload']));
+    for (const hidden of ['rpcUrl', 'bundlerUrl', 'pimlicoApiKey', 'amlProviderData', 'ownerId', 'appId']) {
+      expect(fields).not.toContain(hidden);
+    }
   });
 
   it('matches a Solana cluster by its bare name too', async () => {

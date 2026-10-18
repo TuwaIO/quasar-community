@@ -11,6 +11,8 @@ type InputVariant = 'default' | 'nova';
 
 interface InputFieldProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
+  /** `caps`: small upper-case label of the dashboard forms; `form`: the sentence-case label of the sign-in pages. */
+  labelVariant?: 'caps' | 'form';
   icon?: ComponentType<{ className?: string }>;
   trailingIcon?: ComponentType<{ className?: string }>;
   onTrailingIconClick?: () => void;
@@ -56,6 +58,7 @@ const errorStyles: Record<InputVariant, string> = {
 
 export default function InputField({
   label,
+  labelVariant = 'caps',
   icon: Icon,
   trailingIcon: TrailingIcon,
   onTrailingIconClick,
@@ -74,16 +77,19 @@ export default function InputField({
   return (
     <div className={cn('flex flex-col gap-1.5', wrapperClassName)}>
       {label && (
-        <div className="flex items-center gap-2 ml-1">
+        <div className={cn('flex items-center gap-2', labelVariant === 'caps' && 'ml-1')}>
           <label
             htmlFor={props.id || props.name}
             className={cn(
-              'text-[10px] font-bold uppercase tracking-widest',
-              variant === 'default' ? 'text-slate-600 dark:text-gray-400' : 'text-[var(--tuwa-text-tertiary)]',
+              labelVariant === 'form'
+                ? 'text-sm font-medium text-[var(--tuwa-text-primary)]'
+                : 'text-[10px] font-bold uppercase tracking-widest',
+              labelVariant === 'caps' &&
+                (variant === 'default' ? 'text-slate-600 dark:text-gray-400' : 'text-[var(--tuwa-text-tertiary)]'),
             )}
           >
             {label}
-            {required && <span className="ml-1 text-red-500">*</span>}
+            {required && labelVariant === 'caps' && <span className="ml-1 text-red-500">*</span>}
           </label>
           {tooltipContent && (
             <Tooltip content={tooltipContent}>

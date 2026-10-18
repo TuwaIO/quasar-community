@@ -16,6 +16,7 @@ import { isPublicRpcFallbackEnabled } from '../../common/provider-policy';
 import { getAlchemyKey } from '../../constants';
 import * as schema from '../../database/schema/index';
 import { alchemyNetworkMap } from '../../lib/generated/alchemyNetworkMap';
+import { trackingLagSeconds } from './lag';
 import { isUsableRpcUrl } from './rpc-guard';
 
 /** Maximum number of cached Wagmi configs. Prevents unbounded memory growth in long-running pods. */
@@ -55,6 +56,7 @@ export async function processEvmTx(
 ) {
   const chainId = Number(tx.chainId);
   const appId = tx.appId;
+  const trackingStartedAt = Date.now();
 
   if (!appId) {
     throw new Error(`[EVM TRACKER] Missing appId for tx ${tx.txKey}. BYO-RPC requires appId.`);
@@ -197,8 +199,7 @@ export async function processEvmTx(
         const redisConf = await redis.get(redisKey);
         const confirmations = redisConf ? parseInt(redisConf) : undefined;
 
-        const lagMs = Math.max(0, Date.now() - timestamp * 1000);
-        const lagSeconds = lagMs / 1000;
+        const lagSeconds = trackingLagSeconds(timestamp * 1000, trackingStartedAt);
 
         // Record metrics
         lagGauge.set({ ecosystem: 'EVM', chainId: String(chainId) }, lagSeconds);

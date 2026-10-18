@@ -25,6 +25,11 @@ export QUASAR_MIGRATE_IMAGE="${QUASAR_MIGRATE_IMAGE:-}"
 
 COMPOSE_CMD="docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.${ENV_SUFFIX}.yml"
 COMPOSE_PROJECT_FILTER=(--filter label=com.docker.compose.project=quasar)
+# Held by a stack on this host while its freshly pulled images belong to no container; every prune waits for it.
+DOCKER_IMAGE_LOCK=/var/lock/quasar-docker-images.lock
+# The disk Docker needs free before a pull: the three application images take about 5 GB, and Redis and PostgreSQL
+# must still be able to write after them.
+MIN_FREE_GB=${DEPLOY_MIN_FREE_GB:-10}
 
 echo "Starting deployment to ${ENV_SUFFIX} environment..."
 
@@ -79,6 +84,33 @@ cleanup_redis() {
   done
   echo "[Redis] Orphaned key cleanup complete."
 }
+
+# ---------------------------------------------------------------------------
+# 0. Free the disk before the pull
+# ---------------------------------------------------------------------------
+# The prune at the end of this script runs only after a deploy that succeeded: one that fails halfway leaves its
+# pulled images behind, and the next deploy pulls more on top. On 2026-10-16 that filled the staging disk in the middle
+# of a deploy, and Redis, unable to persist, refused every write. So the unused images go first, under the image lock.
+# Images only, not `docker system prune`: a container that crashed must stay for Compose to start again, not vanish.
+# A disk still too full after that stops the deploy here, before it has changed anything.
+free_disk_before_pull() {
+  if command -v flock >/dev/null 2>&1; then
+    flock -w 300 "$DOCKER_IMAGE_LOCK" docker image prune -a -f >/dev/null \
+      || echo "[WARN] Unused images were not pruned before the pull (image lock busy or prune failed); continuing."
+  else
+    docker image prune -a -f >/dev/null || echo "[WARN] Unused images were not pruned before the pull; continuing."
+  fi
+
+  local DOCKER_ROOT FREE_GB
+  DOCKER_ROOT=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
+  FREE_GB=$(df -Pk "$DOCKER_ROOT" | awk 'NR == 2 { print int($4 / 1048576) }')
+  echo "Free disk for Docker before the pull: ${FREE_GB} GB (${DOCKER_ROOT})."
+  if [ "$FREE_GB" -lt "$MIN_FREE_GB" ]; then
+    echo "ERROR: Less than ${MIN_FREE_GB} GB free for Docker. Free the disk first: a full disk stops Redis and PostgreSQL from writing."
+    exit 1
+  fi
+}
+free_disk_before_pull
 
 # ---------------------------------------------------------------------------
 # 1. Pull prebuilt application images & build Postgres (no prebuilt image in CI)
@@ -190,7 +222,7 @@ UP_ERROR=$(${COMPOSE_CMD} up -d --no-build --remove-orphans \
   redis-ui-node-1 redis-ui-node-2 \
   redis-exporter-api redis-exporter-ui pgbouncer-exporter \
   prometheus grafana loki promtail cadvisor node-exporter blackbox-exporter \
-  cloudflared cloudflared-2 alertmanager traefik 2>&1)
+  cloudflared cloudflared-2 alertmanager traefik traefik-log-rotate 2>&1)
 UP_STATUS=$?
 set -e
 echo "$UP_ERROR"
@@ -198,6 +230,35 @@ if [ "$UP_STATUS" -ne 0 ]; then
   echo "ERROR: Failed to update infrastructure services. Exiting without stopping the running stack."
   exit "$UP_STATUS"
 fi
+
+# A service reads its bind-mounted config only when it starts, and Compose recreates a container only when its
+# definition changes, not the file: `git checkout` replaces the file, and the running container keeps the old one. So a
+# service whose config changed since the config was last applied is recreated here. That commit is kept outside the
+# repository (the checkout must stay clean), and a deploy that fails before this point leaves it as it was. Without it
+# nothing tells which config the running containers read, so every service in the list is recreated. Redis and
+# PgBouncer are not in the list: a change of their config goes by hand.
+CONFIG_STATE_FILE="${HOME:-/root}/.quasar-deploy/config-applied-${ENV_SUFFIX}"
+CONFIG_BASE=$(cat "$CONFIG_STATE_FILE" 2>/dev/null || true)
+recreate_on_config_change() {
+  local SERVICE=$1
+  shift
+  if [ -n "$CONFIG_BASE" ] \
+    && git cat-file -e "${CONFIG_BASE}^{commit}" 2>/dev/null \
+    && git diff --quiet "$CONFIG_BASE" HEAD -- "$@"; then
+    return 0
+  fi
+  echo "The configuration of ${SERVICE} changed; recreating it..."
+  ${COMPOSE_CMD} up -d --no-build --no-deps --force-recreate "$SERVICE"
+}
+recreate_on_config_change traefik infra/config/traefik
+recreate_on_config_change prometheus infra/config/prometheus
+recreate_on_config_change alertmanager infra/config/alertmanager
+recreate_on_config_change loki infra/config/loki
+recreate_on_config_change promtail infra/config/promtail
+recreate_on_config_change blackbox-exporter infra/config/blackbox
+recreate_on_config_change grafana infra/config/grafana
+mkdir -p "$(dirname "$CONFIG_STATE_FILE")" && git rev-parse HEAD >"$CONFIG_STATE_FILE" \
+  || echo "[WARN] Could not record the applied configuration in ${CONFIG_STATE_FILE}."
 
 wait_for_database_service() {
   local SERVICE=$1
@@ -321,6 +382,15 @@ check_healthy() {
   return 1
 }
 
+# A replacement that failed its health check is removed before the deploy stops (check_healthy printed its logs), so
+# the old containers, still running, serve alone instead of next to a new version that does not work.
+remove_failed_replacement() {
+  local CNAME=$1
+  echo "Removing the failed replacement ${CNAME}; the previous containers keep running."
+  docker rm -f "$CNAME" >/dev/null 2>&1 || true
+  exit 1
+}
+
 rollout_service() {
   local SERVICE=$1
   local PORT=$2
@@ -403,7 +473,7 @@ rollout_service() {
       local NEW_CNAME
       NEW_CNAME=$(docker inspect --format='{{.Name}}' "$NEW_ID" | sed 's|^/||')
       echo "New container: ${NEW_CNAME} (${NEW_ID})"
-      check_healthy "$NEW_CNAME" "$PORT" "$HEALTH_PATH" || exit 1
+      check_healthy "$NEW_CNAME" "$PORT" "$HEALTH_PATH" || remove_failed_replacement "$NEW_CNAME"
     done
 
     # Only remove the old container after every newly-created container is healthy.
@@ -495,7 +565,7 @@ rollout_worker() {
       local NEW_CNAME
       NEW_CNAME=$(docker inspect --format='{{.Name}}' "$NEW_ID" | sed 's|^/||')
       echo "New worker container: ${NEW_CNAME} (${NEW_ID})"
-      check_healthy "$NEW_CNAME" "3001" "/v1/engine/monitoring/health" || exit 1
+      check_healthy "$NEW_CNAME" "3001" "/v1/engine/monitoring/health" || remove_failed_replacement "$NEW_CNAME"
     done
 
     docker stop "$CNAME"
@@ -589,14 +659,18 @@ echo "Cleaning up dangling Docker images..."
 # The prune waits for the lock detached, on the server: the CI runner holding
 # this SSH session is billed by the minute and must not sit through the wait.
 # stdin/stdout/stderr are all redirected, or the session would stay open.
-DOCKER_IMAGE_LOCK=/var/lock/quasar-docker-images.lock
+#
+# Images and the build cache only, not `docker system prune`: that also deletes
+# stopped containers, and a service that crashed is then gone instead of
+# restarted (on 2026-10-16 five Redis nodes went that way after a full disk).
 DOCKER_PRUNE_LOG=/tmp/quasar-docker-prune.log
+DOCKER_PRUNE='docker image prune -a -f && docker builder prune -f'
 if command -v flock >/dev/null 2>&1 && command -v setsid >/dev/null 2>&1; then
-  setsid nohup flock -w 1800 "$DOCKER_IMAGE_LOCK" docker system prune -a -f \
+  setsid nohup flock -w 1800 "$DOCKER_IMAGE_LOCK" sh -c "$DOCKER_PRUNE" \
     </dev/null >"$DOCKER_PRUNE_LOG" 2>&1 &
   echo "Prune runs in the background once ${DOCKER_IMAGE_LOCK} is free (log: ${DOCKER_PRUNE_LOG})."
 else
-  docker system prune -a -f
+  sh -c "$DOCKER_PRUNE"
 fi
 
 echo "Deployment to ${ENV_SUFFIX} completed successfully."

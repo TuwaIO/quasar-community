@@ -2,6 +2,7 @@ import { createId } from '@tuwaio/shared/cuid';
 import type { CollectionConfig } from 'payload';
 
 import { isMemberOfEndpointOrganization } from '@/lib/access';
+import { recordDataAccess } from '@/lib/dataAccess';
 
 /**
  * WebhookDeliveries Collection
@@ -13,6 +14,10 @@ import { isMemberOfEndpointOrganization } from '@/lib/access';
  */
 export const WebhookDeliveries: CollectionConfig = {
   slug: 'webhook-deliveries',
+  hooks: {
+    // Each view of this customer data in the admin panel is recorded
+    afterOperation: [recordDataAccess('webhook-deliveries')],
+  },
   disableDuplicate: true,
   admin: {
     useAsTitle: 'id',

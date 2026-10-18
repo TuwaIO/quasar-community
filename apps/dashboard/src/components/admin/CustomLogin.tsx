@@ -2,14 +2,7 @@
 
 import './css.css';
 
-import {
-  ChevronRightIcon,
-  EnvelopeIcon,
-  EyeIcon,
-  EyeSlashIcon,
-  LockClosedIcon,
-  ShieldCheckIcon,
-} from '@heroicons/react/24/outline';
+import { EyeIcon, EyeSlashIcon, ShieldCheckIcon } from '@heroicons/react/24/outline';
 import { useForm, useStore } from '@tanstack/react-form';
 import { StarryBackground, ThemeSwitcher } from '@tuwaio/docs-ui';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -17,11 +10,13 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
 
+import { AuthCard, AuthTitle } from '@/components/auth/AuthCard';
+import { AuthButton, AuthTextButton } from '@/components/auth/AuthElements';
 import ErrorAlert from '@/components/ui/ErrorAlert';
-import GlassCard from '@/components/ui/GlassCard';
 import InputField from '@/components/ui/InputField';
 import { TwoFactorInput } from '@/components/ui/TwoFactorInput';
 import { UI_TEXT } from '@/constants/ui-text';
+import { adminThemeCookie, rememberThemeChoice } from '@/lib/themePreference';
 
 const fieldTransition = {
   duration: 0.28,
@@ -80,7 +75,8 @@ export default function CustomLogin() {
     }
     if (typeof window !== 'undefined') {
       localStorage.setItem('theme', nextTheme);
-      document.cookie = `payload-theme=${nextTheme}; path=/; max-age=31536000; SameSite=Lax`;
+      rememberThemeChoice();
+      document.cookie = adminThemeCookie(nextTheme);
     }
   };
 
@@ -160,7 +156,7 @@ export default function CustomLogin() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-between overflow-y-auto overflow-x-hidden bg-slate-50 dark:bg-[#0b0e17] text-slate-900 dark:text-white transition-colors duration-300">
+    <div className="tuwa-admin-login fixed inset-0 z-50 flex flex-col justify-between overflow-y-auto overflow-x-hidden bg-slate-50 dark:bg-[#0b0e17] text-slate-900 dark:text-white transition-colors duration-300">
       {/* Desktop Starry Canvas Background */}
       <div className="hidden md:block pointer-events-none fixed inset-0 -z-10 overflow-hidden [&>canvas]:pointer-events-none [&>canvas]:-z-10">
         <StarryBackground />
@@ -195,31 +191,23 @@ export default function CustomLogin() {
       {/* Main Authentication Flow matching Client AuthClient */}
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-4 pt-20 sm:pt-24 pb-8 w-full my-auto">
         <div className="text-center mb-6 sm:mb-8">
-          <h1 className="text-5xl sm:text-6xl font-mono font-black tracking-tight text-[var(--tuwa-text-primary)] uppercase drop-shadow-sm">
-            QUASAR
-          </h1>
+          <AuthTitle />
           <div className="inline-flex items-center gap-1.5 mt-2.5 px-3 py-1 rounded-full bg-[var(--tuwa-text-accent)]/10 border border-[var(--tuwa-text-accent)]/20 text-[var(--tuwa-text-accent)] text-xs font-mono font-semibold tracking-wider uppercase">
             <ShieldCheckIcon className="h-3.5 w-3.5" />
             <span>{step === 'login' ? 'Admin Gateway' : 'Security Verification'}</span>
           </div>
         </div>
 
-        <GlassCard
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.3, ease: 'easeOut' }}
-        >
-          <div className="mb-6 text-center">
-            <p className="text-sm text-slate-500 dark:text-gray-400">
-              {step === 'login'
-                ? 'Enter your administrative credentials to access the Quasar core.'
-                : 'Please enter the 6-digit verification code from your authenticator app.'}
-            </p>
-          </div>
+        <AuthCard>
+          <p className="text-center text-sm leading-[1.55] text-[var(--tuwa-text-secondary)]">
+            {step === 'login'
+              ? 'Enter your administrative credentials to access the Quasar core.'
+              : 'Please enter the 6-digit verification code from your authenticator app.'}
+          </p>
 
           <ErrorAlert message={error || ''} />
 
-          <form onSubmit={handleSubmit} className="flex flex-col">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-[18px]">
             <AnimatePresence mode="wait">
               {step === 'login' ? (
                 <motion.div
@@ -228,7 +216,7 @@ export default function CustomLogin() {
                   animate={{ x: 0, opacity: 1 }}
                   exit={{ x: 20, opacity: 0 }}
                   transition={fieldTransition}
-                  className="space-y-4"
+                  className="flex flex-col gap-[18px]"
                 >
                   <form.Field
                     name="email"
@@ -242,8 +230,10 @@ export default function CustomLogin() {
                   >
                     {(field) => (
                       <InputField
-                        label="Email Address"
-                        icon={EnvelopeIcon}
+                        id="admin-email"
+                        label={UI_TEXT.PAGES.AUTH.FORM.EMAIL_LABEL}
+                        labelVariant="form"
+                        className="bg-[var(--tuwa-bg-secondary)]"
                         type="email"
                         placeholder="admin@example.com"
                         value={field.state.value}
@@ -272,8 +262,10 @@ export default function CustomLogin() {
                   >
                     {(field) => (
                       <InputField
-                        label="Password"
-                        icon={LockClosedIcon}
+                        id="admin-password"
+                        label={UI_TEXT.PAGES.AUTH.FORM.PASSWORD_LABEL}
+                        labelVariant="form"
+                        className="bg-[var(--tuwa-bg-secondary)]"
                         type={showPassword ? 'text' : 'password'}
                         placeholder="••••••••••••"
                         value={field.state.value}
@@ -299,7 +291,7 @@ export default function CustomLogin() {
                   animate={{ x: 0, opacity: 1 }}
                   exit={{ x: -20, opacity: 0 }}
                   transition={fieldTransition}
-                  className="space-y-6"
+                  className="flex flex-col gap-[18px]"
                 >
                   <form.Field name="otp">
                     {(field) => (
@@ -314,42 +306,29 @@ export default function CustomLogin() {
                       />
                     )}
                   </form.Field>
-                  <button
-                    type="button"
+                  <AuthTextButton
                     onClick={() => {
                       setStep('login');
                       form.setFieldValue('otp', Array(6).fill(''));
                     }}
-                    className="text-xs text-[var(--tuwa-text-tertiary)] hover:text-[var(--tuwa-text-primary)] transition-colors block mx-auto cursor-pointer font-mono font-medium"
                   >
                     ← Back to credentials
-                  </button>
+                  </AuthTextButton>
                 </motion.div>
               )}
             </AnimatePresence>
 
-            <motion.button
+            <AuthButton
               type="submit"
-              disabled={!canSubmit || !isFormValid || isPending}
-              whileHover={!isPending && canSubmit && isFormValid ? { scale: 1.01 } : {}}
-              whileTap={{ scale: 0.98 }}
-              style={{ border: 'none', outline: 'none' }}
-              className="group mt-6 relative w-full cursor-pointer overflow-hidden rounded-[var(--tuwa-rounded-corners)] bg-[var(--tuwa-text-accent)] px-4 py-3 font-mono font-bold text-[var(--tuwa-text-on-accent)] shadow-md transition-all hover:opacity-90 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!canSubmit || !isFormValid}
+              pending={isPending}
+              pendingLabel="Processing..."
+              chevron
             >
-              {isPending ? (
-                <div className="flex items-center justify-center gap-2">
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                  <span>Processing...</span>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center gap-2">
-                  <span>{step === 'login' ? 'Authenticate' : 'Verify & Enter'}</span>
-                  <ChevronRightIcon className="h-4 w-4 stroke-[2.5] transition-transform group-hover:translate-x-1" />
-                </div>
-              )}
-            </motion.button>
+              {step === 'login' ? 'Authenticate' : 'Verify & Enter'}
+            </AuthButton>
           </form>
-        </GlassCard>
+        </AuthCard>
       </main>
 
       {/* Footer */}

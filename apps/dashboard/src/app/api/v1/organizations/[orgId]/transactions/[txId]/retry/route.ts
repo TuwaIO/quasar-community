@@ -4,6 +4,8 @@ import { NextResponse } from 'next/server';
 import { QUEUE_FAST } from '@/../constants';
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccessOrSystemAdmin } from '@/lib/auth-utils';
+import { recordAdminView } from '@/lib/dataAccess';
+import { DATA_PROCESSING_REQUIRED, isDataIntakeOpen } from '@/lib/dataIntake';
 import { getQueue, redisApi } from '@/lib/redis';
 import { canRetryTransaction } from '@/lib/transaction-retry';
 import { apps, transactions } from '@/payload-generated-schema';
@@ -19,6 +21,8 @@ export const runtime = 'nodejs';
  * - Fetches the transaction and confirms it belongs to the organization (BOLA-safe).
  * - Refuses a transaction `canRetryTransaction` rules out: one that finished in
  *   Success, or one pending for less than the stuck threshold.
+ * - Refuses it while the intake of the organization is closed, as the engine's
+ *   own retry does (`isDataIntakeOpen`): 403 `data_processing_required`.
  * - Evicts the Redis terminal dedup key so the tracker will re-process it.
  * - Resets the DB record to Pending state.
  * - Enqueues the transaction into the {tracking-fast} BullMQ queue.
@@ -34,6 +38,8 @@ export const POST = withRateLimit(
 
       const access = await verifyOrgAccessOrSystemAdmin(payload, user, orgId, ['owner', 'admin', 'member']);
       if (access instanceof NextResponse) return access;
+      // A system admin opens customer data here past access control: the view is recorded
+      await recordAdminView(payload, { user, collection: 'transactions', id: txId });
 
       const db = payload.db.drizzle;
 
@@ -74,9 +80,15 @@ export const POST = withRateLimit(
         );
       }
 
+      // 4. The same rule as the engine's retry: no re-tracking while the intake of the organization is closed
+      const organization = (await payload
+        .findByID({ collection: 'organizations', id: orgId, depth: 0, overrideAccess: true })
+        .catch(() => null)) as { dataProcessing?: string | null; intakeClosesAt?: string | null } | null;
+      if (!isDataIntakeOpen(organization)) return NextResponse.json(DATA_PROCESSING_REQUIRED, { status: 403 });
+
       const { txKey, appId } = tx;
 
-      // 4. Evict the Redis terminal dedup key (best-effort, non-fatal)
+      // 5. Evict the Redis terminal dedup key (best-effort, non-fatal)
       // Key format matches NestJS TrackingService: `tracking:finished:${appId}:${txKey}`
       if (appId) {
         const finishedKey = `tracking:finished:${appId}:${txKey}`;
@@ -85,7 +97,7 @@ export const POST = withRateLimit(
         });
       }
 
-      // 5. Reset the DB record to Pending state
+      // 6. Reset the DB record to Pending state
       await db
         .update(transactions)
         .set({
@@ -98,7 +110,7 @@ export const POST = withRateLimit(
         })
         .where(and(eq(transactions.id, Number(txId)), eq(transactions.owner, orgId)));
 
-      // 6. Re-enqueue into {tracking-fast} BullMQ queue
+      // 7. Re-enqueue into {tracking-fast} BullMQ queue
       if (appId) {
         const fastQueue = getQueue(QUEUE_FAST);
         const jobId = `retry-dashboard-${appId}-${txKey}-${Date.now()}`;

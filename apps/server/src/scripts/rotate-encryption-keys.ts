@@ -13,11 +13,27 @@
  * schema, which do not resolve from the repository root.
  */
 import * as crypto from 'crypto';
-import { eq } from 'drizzle-orm';
+import { eq, isNotNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 
 import * as schema from '../database/schema/index';
+
+/** Every field stored encrypted (`qenc:`): its table, its name and the label printed while it is rotated. */
+export const ROTATED_FIELDS: [table: any, field: string, label: string][] = [
+  [schema.apps, 'secretKey', 'Apps (Secret Key)'],
+  [schema.apps, 'alchemyApiKey', 'Apps (Alchemy API Key)'],
+  [schema.apps, 'quickNodeApiKey', 'Apps (QuickNode API Key)'],
+  [schema.apps, 'gelatoApiKey', 'Apps (Gelato API Key)'],
+  [schema.apps, 'pimlicoApiKey', 'Apps (Pimlico API Key)'],
+  [schema.webhookEndpoints, 'signingSecret', 'Webhooks (Signing Secrets)'],
+  [schema.users, 'twoFactorSecret', 'Users (2FA Secrets)'],
+  [schema.users, 'backupCode', 'Users (Backup Codes)'],
+  [schema.appsRpcConfigs, 'rpcUrl', 'RPC Configurations'],
+  // A bundler URL and a Pimlico key sent with a transaction (sync.controller.ts)
+  [schema.transactions, 'bundlerUrl', 'Transactions (Bundler URL)'],
+  [schema.transactions, 'pimlicoApiKey', 'Transactions (Pimlico API Key)'],
+];
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
@@ -90,7 +106,11 @@ async function main() {
    */
   async function rotateTableField(table: any, fieldName: string, label: string) {
     console.log(`\nChecking ${label}...`);
-    const records = (await db.select().from(table)) as any[];
+    // Only the rows that hold a value: the transactions table is large
+    const records = (await db
+      .select({ id: table.id, [fieldName]: table[fieldName] })
+      .from(table)
+      .where(isNotNull(table[fieldName]))) as any[];
     console.log(`Found ${records.length} records.`);
 
     let success = 0;
@@ -135,23 +155,10 @@ async function main() {
     return { success, skip, fail };
   }
 
-  const results = [
-    // 1. Rotate Apps Sensitive Fields
-    await rotateTableField(schema.apps, 'secretKey', 'Apps (Secret Key)'),
-    await rotateTableField(schema.apps, 'alchemyApiKey', 'Apps (Alchemy API Key)'),
-    await rotateTableField(schema.apps, 'quickNodeApiKey', 'Apps (QuickNode API Key)'),
-    await rotateTableField(schema.apps, 'gelatoApiKey', 'Apps (Gelato API Key)'),
-
-    // 2. Rotate Webhook Signing Secrets
-    await rotateTableField(schema.webhookEndpoints, 'signingSecret', 'Webhooks (Signing Secrets)'),
-
-    // 3. Rotate User Security Data
-    await rotateTableField(schema.users, 'twoFactorSecret', 'Users (2FA Secrets)'),
-    await rotateTableField(schema.users, 'backupCode', 'Users (Backup Codes)'),
-
-    // 4. Rotate RPC URLs
-    await rotateTableField(schema.appsRpcConfigs, 'rpcUrl', 'RPC Configurations'),
-  ];
+  const results: { success: number; skip: number; fail: number }[] = [];
+  for (const [table, field, label] of ROTATED_FIELDS) {
+    results.push(await rotateTableField(table, field, label));
+  }
   await pool.end();
 
   // A failed record is still encrypted with the old key: switching ENCRYPTION_KEY now would make it unreadable
