@@ -68,9 +68,12 @@ export interface SeedWorkspaceOptions {
  * slug prefix "tuwa-team", quotaBalance 1000000, rpsLimit/rpsPaidLimit 100).
  */
 export async function seedWorkspace(payload: Payload, adminUser: any, options: SeedWorkspaceOptions = {}) {
+  // The workspace is the admin's first organization. Without a sort Payload returns the newest, so an organization the
+  // admin created later (for tests) would get the operator's status, the default apps and the Billing webhook.
   const { docs: orgs } = await payload.find({
     collection: 'organizations',
     where: { createdBy: { equals: adminUser.id } },
+    sort: 'createdAt',
     limit: 1,
   });
 

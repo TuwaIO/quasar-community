@@ -155,6 +155,31 @@ describe('Organizations: data processing status', () => {
 
     expect(payload.update).not.toHaveBeenCalled();
   });
+
+  // Payload sorts by `-createdAt` when a query names no sort (`@payloadcms/drizzle` buildOrderBy). An organization the
+  // admin creates later, for tests, is not the deployment's workspace: the seed must neither mark it as the operator's
+  // nor give it the default apps and the Billing webhook.
+  it("finds the admin's first workspace, not an organization the admin created later", async () => {
+    const orgs = [
+      { id: 'org_workspace', createdAt: '2026-09-09T04:37:44.610Z', dataProcessing: DATA_PROCESSING.OWN },
+      { id: 'org_later', createdAt: '2026-10-15T06:46:08.896Z', dataProcessing: DATA_PROCESSING.PENDING },
+    ];
+    const payload = {
+      find: vi.fn(async ({ sort, limit }: { sort?: string; limit: number }) => {
+        const ascending = sort === 'createdAt';
+        const docs = [...orgs].sort((a, b) =>
+          ascending ? a.createdAt.localeCompare(b.createdAt) : b.createdAt.localeCompare(a.createdAt),
+        );
+        return { docs: docs.slice(0, limit), totalDocs: docs.length };
+      }),
+      update: vi.fn(),
+      create: vi.fn(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    };
+
+    await expect(seedWorkspace(payload as any, { id: 'u_admin' })).resolves.toBe('org_workspace');
+    expect(payload.update).not.toHaveBeenCalled();
+  });
 });
 
 // When a version of the DPA that the organization has not accepted takes effect: the engine refuses its transactions

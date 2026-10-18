@@ -132,7 +132,7 @@
       },
       "targets": [
         {
-          "expr": "sum(count_over_time({container_name=~\".+\"} |~ \"(?i)(error|fatal|panic)\" [$__interval]))",
+          "expr": "sum(count_over_time({container_name=~\".+\"} |~ \"(?i)(error|fatal|panic)\" !~ \"query_hash=|middleware=QueryShard\" [$__interval]))",
           "refId": "A"
         }
       ],
@@ -173,7 +173,7 @@
       },
       "targets": [
         {
-          "expr": "sum(count_over_time({container_name=~\".+\"} |~ \"(?i)(warn|warning)\" [$__interval]))",
+          "expr": "sum(count_over_time({container_name=~\".+\"} |~ \"(?i)(warn|warning)\" !~ \"query_hash=|middleware=QueryShard\" [$__interval]))",
           "refId": "A"
         }
       ],
@@ -261,7 +261,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (container_name) (count_over_time({container_name=~\".+\"} |~ \"(?i)(error|fatal|panic)\" [$__interval]))",
+          "expr": "sum by (container_name) (count_over_time({container_name=~\".+\"} |~ \"(?i)(error|fatal|panic)\" !~ \"query_hash=|middleware=QueryShard\" [$__interval]))",
           "legendFormat": "{{container_name}}",
           "refId": "A"
         }
@@ -333,7 +333,7 @@
       },
       "targets": [
         {
-          "expr": "{container_name=~\"$container\", container_name=~\".+\"} |~ \"(?i)(error|fatal|panic)\"",
+          "expr": "{container_name=~\"$container\", container_name=~\".+\"} |~ \"(?i)(error|fatal|panic)\" !~ \"query_hash=|middleware=QueryShard\"",
           "refId": "A"
         }
       ],
