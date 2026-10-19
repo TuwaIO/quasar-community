@@ -23,7 +23,7 @@ export interface ReadLimits {
   maxLineBytes: number;
 }
 
-export const DEFAULT_READ_LIMITS: ReadLimits = {
+const DEFAULT_READ_LIMITS: ReadLimits = {
   maxDecompressedBytes: 4 * 1024 ** 3,
   maxLineBytes: 1024 ** 2,
 };

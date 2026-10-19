@@ -1,3 +1,4 @@
+import { encrypt } from '@tuwaio/shared/encryption';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { WebhookEndpoints } from '@/collections/ContextWebhooks/WebhookEndpoints';
@@ -139,7 +140,7 @@ describe('Webhook Localhost Policy & Error Formatting', () => {
       mockCreate.mockResolvedValue({
         id: 'wh_1',
         url: 'http://localhost:3000/api/webhooks/quasar',
-        signingSecret: 'qenc:mock',
+        signingSecret: encrypt('whsec_mock'),
         events: ['*'],
         isActive: true,
       });
@@ -159,6 +160,8 @@ describe('Webhook Localhost Policy & Error Formatting', () => {
       const data = await response.json();
       expect(data.id).toBe('wh_1');
       expect(data.url).toBe('http://localhost:3000/api/webhooks/quasar');
+      // The signing secret is returned once, decrypted
+      expect(data.signingSecret).toBe('whsec_mock');
       // Without a transaction type the endpoint receives every type, as in the collection (an empty one is invalid)
       expect(mockCreate.mock.calls[0][0].data.txType).toBe('*');
     });

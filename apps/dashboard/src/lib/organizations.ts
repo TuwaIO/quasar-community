@@ -1,22 +1,6 @@
-import { eq } from 'drizzle-orm';
 import type { Payload } from 'payload';
 
-import { organization_members } from '@/payload-generated-schema';
 import type { OrganizationMember } from '@/payload-types';
-
-/**
- * Get all organization IDs where a user is a member
- */
-export const getUserOrgIds = async (payload: Payload, userId: string): Promise<string[]> => {
-  const db = payload.db.drizzle;
-
-  const memberships = await db
-    .select({ organizationId: organization_members.organization })
-    .from(organization_members)
-    .where(eq(organization_members.user, userId));
-
-  return memberships.map((m) => m.organizationId).filter(Boolean);
-};
 
 /**
  * Get a user's role in a specific organization.

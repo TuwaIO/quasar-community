@@ -71,8 +71,11 @@ export const enum_access_reviews_findings_severity = pgEnum('enum_access_reviews
 ]);
 export const enum_access_reviews_server_sessions_reason = pgEnum('enum_access_reviews_server_sessions_reason', [
   'migration',
+  'config',
   'restore',
   'incident',
+  'server_update',
+  'checks',
   'admin_cannot',
 ]);
 export const enum_access_reviews_status = pgEnum('enum_access_reviews_status', ['collecting', 'ready', 'confirmed']);
@@ -541,8 +544,10 @@ export const access_reviews_server_sessions = pgTable(
     user: varchar('user'),
     method: varchar('method'),
     keyFingerprint: varchar('key_fingerprint'),
+    connection: varchar('connection'),
     auto: boolean('auto').default(false),
     reason: enum_access_reviews_server_sessions_reason('reason'),
+    work: varchar('work'),
     readData: varchar('read_data'),
   },
   (columns) => [

@@ -21,7 +21,7 @@ const appOrigin = () => {
   return new URL(appUrl).origin;
 };
 
-export function isSameOrigin(req: Request): boolean {
+function isSameOrigin(req: Request): boolean {
   const origin = req.headers.get('origin');
   if (!origin) return false;
   const allowed = [appOrigin()];

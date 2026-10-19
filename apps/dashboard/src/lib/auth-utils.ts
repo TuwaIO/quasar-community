@@ -4,7 +4,7 @@ import { getPayload, type Payload, type PayloadRequest } from 'payload';
 import configObject from '@/payload.config';
 import type { User } from '@/payload-types';
 
-import { getUserOrgIds, requireOrgRole } from './organizations';
+import { requireOrgRole } from './organizations';
 
 /**
  * Result of a successful authentication attempt
@@ -101,41 +101,4 @@ export async function verifyOrgAccessOrSystemAdmin(
 ): Promise<{ allowed: true } | NextResponse> {
   if (user.roles?.includes('admin')) return { allowed: true };
   return verifyOrgAccess(payload, user.id, orgId, requiredRoles);
-}
-
-/**
- * Fetches an app by ID, scoped to the user's organizations (BOLA protection).
- * Returns the app document and its orgId, or a 404 NextResponse.
- */
-export async function fetchScopedApp(
-  payload: Payload,
-  userId: string,
-  appId: string,
-  select?: Record<string, boolean>,
-) {
-  const orgIds = await getUserOrgIds(payload, userId);
-
-  if (orgIds.length === 0) {
-    return { error: NextResponse.json({ error: 'No organizations found' }, { status: 403 }) };
-  }
-
-  const appResult = await payload.find({
-    collection: 'apps',
-    where: {
-      and: [{ id: { equals: appId } }, { organization: { in: orgIds } }],
-    },
-    limit: 1,
-    depth: 0,
-    overrideAccess: true,
-    ...(select ? { select } : {}),
-  });
-
-  if (appResult.totalDocs === 0) {
-    return { error: NextResponse.json({ error: 'App not found' }, { status: 404 }) };
-  }
-
-  const app = appResult.docs[0];
-  const orgId = typeof app.organization === 'object' ? (app.organization as any)?.id : (app.organization as string);
-
-  return { app, orgId, orgIds };
 }

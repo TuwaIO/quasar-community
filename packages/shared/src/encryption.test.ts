@@ -34,36 +34,40 @@ describe('Encryption Utility', () => {
     expect(decrypt('')).toBe('');
   });
 
-  it('should return original string if decryption fails or not encrypted', () => {
+  it('should return a string without the prefix as it is', () => {
     expect(decrypt('not-encrypted')).toBe('not-encrypted');
-    expect(decrypt('qenc:invalid:format')).toBe('qenc:invalid:format');
   });
 
-  it('should fail decryption and return original string if the auth tag is truncated', () => {
+  // Fails closed: a value that cannot be decrypted is never handed on as if it were the plaintext
+  it('should throw if the cipher text has the wrong structure', () => {
+    expect(() => decrypt('qenc:invalid:format')).toThrow('Decryption failed: Malformed cipher text structure');
+  });
+
+  it('should throw if the auth tag is truncated', () => {
     const encrypted = encrypt(testUrl);
     const parts = encrypted.slice('qenc:'.length).split(':');
     // Truncate the auth tag to 8 bytes (16 hex chars)
     parts[1] = parts[1].slice(0, 16);
     const corrupted = `qenc:${parts.join(':')}`;
-    expect(decrypt(corrupted)).toBe(corrupted);
+    expect(() => decrypt(corrupted)).toThrow('Decryption failed');
   });
 
-  it('should fail decryption and return original string if the ciphertext is corrupted', () => {
+  it('should throw if the ciphertext is corrupted', () => {
     const encrypted = encrypt(testUrl);
     const parts = encrypted.slice('qenc:'.length).split(':');
     // Corrupt the ciphertext by changing a char guaranteed to be different
     parts[2] = parts[2][0] === '0' ? '1' + parts[2].slice(1) : '0' + parts[2].slice(1);
     const corrupted = `qenc:${parts.join(':')}`;
-    expect(decrypt(corrupted)).toBe(corrupted);
+    expect(() => decrypt(corrupted)).toThrow('Decryption failed');
   });
 
-  it('should fail decryption and return original string if IV length is invalid', () => {
+  it('should throw if the IV length is invalid', () => {
     const encrypted = encrypt(testUrl);
     const parts = encrypted.slice('qenc:'.length).split(':');
     // Shorten the IV
     parts[0] = parts[0].slice(0, 10);
     const corrupted = `qenc:${parts.join(':')}`;
-    expect(decrypt(corrupted)).toBe(corrupted);
+    expect(() => decrypt(corrupted)).toThrow('Decryption failed');
   });
 
   it('should throw error if ENCRYPTION_KEY is invalid length', () => {

@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { resolveEnvUrl } from '@tuwaio/shared/utils';
+import type { DefaultJobOptions, QueueOptions } from 'bullmq';
 import Redis, { Cluster } from 'ioredis';
 
 /**
@@ -10,7 +11,7 @@ import Redis, { Cluster } from 'ioredis';
  * passing a plain object with `nodes` is silently ignored,
  * causing a fallback to 127.0.0.1:6379.
  */
-export function createBullMQConnection(configService: ConfigService): Redis | Cluster {
+function createBullMQConnection(configService: ConfigService): Redis | Cluster {
   const rawRedisUrl = configService.get<string>('REDIS_API_URL') || configService.get<string>('REDIS_URL') || '';
   const redisUrl = resolveEnvUrl(rawRedisUrl);
   const isCluster =
@@ -74,4 +75,31 @@ export function createBullMQConnection(configService: ConfigService): Redis | Cl
       return Math.min(times * 200, 2000);
     },
   });
+}
+
+/**
+ * How long finished jobs stay in Redis: completed ones for an hour, failed ones for a day. Every queue gets it
+ * (`bullRootOptions`); a job may ask for less.
+ *
+ * By age only, never by `count`: BullMQ trims by count in one Lua script without a limit, so on a set with a backlog
+ * the first finished job deletes all of it at once, Redis answers BUSY for minutes and the cluster may fail the shard
+ * over (staging deploy, 2026-10-19). By age it removes at most `limit` jobs per finished job, and a backlog drains in
+ * small steps.
+ */
+export const BULLMQ_DEFAULT_JOB_OPTIONS: DefaultJobOptions = {
+  removeOnComplete: { age: 3600, limit: 1000 },
+  removeOnFail: { age: 86400, limit: 1000 },
+};
+
+/**
+ * The shared BullMQ config of `BullModule.forRootAsync`: the connection and {@link BULLMQ_DEFAULT_JOB_OPTIONS}.
+ * Every module that registers the shared config uses it, because whichever registration wins sets the defaults of
+ * every queue: one without them kept every finished job of the outbox processor (720 an hour) and filled the Redis
+ * shard of `{outbox}` (RedisAPIMemoryHigh, 2026-10-19).
+ */
+export function bullRootOptions(configService: ConfigService): QueueOptions {
+  return {
+    connection: createBullMQConnection(configService) as unknown as QueueOptions['connection'],
+    defaultJobOptions: BULLMQ_DEFAULT_JOB_OPTIONS,
+  };
 }

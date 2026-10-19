@@ -1,6 +1,6 @@
 {
   "name": "@tuwaio/quasar-nest",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": false,
   "publishConfig": {
     "access": "public"
@@ -17,8 +17,7 @@
     "lint:fix": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "db:pull": "dotenv -e ../../.env -- drizzle-kit introspect",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "test:cov": "vitest run --coverage"
+    "test:watch": "vitest"
   },
   "keywords": [],
   "author": "Oleksandr Tkach",
@@ -65,7 +64,6 @@
     "@types/redlock": "^4.0.8",
     "dotenv-cli": "^11.0.0",
     "drizzle-kit": "^0.31.11",
-    "ts-node": "^10.9.2",
     "tsx": "^4.23.15",
     "typescript": "6.0.3",
     "unplugin-swc": "^2.0.0",

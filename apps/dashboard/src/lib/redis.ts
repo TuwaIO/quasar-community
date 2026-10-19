@@ -233,7 +233,7 @@ export function getQueue(name: string): Queue {
  * Metadata cache for API Keys
  * format: {apiKey}:meta
  */
-export const getMetadataKey = (apiKey: string) => `{${apiKey}}:meta`;
+const getMetadataKey = (apiKey: string) => `{${apiKey}}:meta`;
 
 /**
  * Organization Quota Limit (Balance)
@@ -276,7 +276,7 @@ export async function invalidateOrganizationAppMetadata(payload: Payload, organi
 /**
  * Constant-time comparison between two secrets using SHA-256 digests.
  */
-export function timingSafeEqualSecret(candidate: string, expected: string): boolean {
+function timingSafeEqualSecret(candidate: string, expected: string): boolean {
   if (typeof candidate !== 'string' || typeof expected !== 'string' || !candidate || !expected) {
     return false;
   }

@@ -237,7 +237,7 @@ export const webhookDeliverySchema = z.object({
   updatedAt: optionalTimestamp,
 });
 
-export const endSchema = z.object({ counts: countsSchema });
+const endSchema = z.object({ counts: countsSchema });
 
 export const RECORD_SCHEMAS = {
   manifest: manifestSchema,

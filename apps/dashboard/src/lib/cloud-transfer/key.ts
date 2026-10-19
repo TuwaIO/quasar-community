@@ -6,7 +6,7 @@ import { CloudTransferError } from './errors';
  * The key of one export: 32 random bytes, shown once as `QEX1-` and 13 groups of four Crockford base32 characters.
  * Random rather than chosen by the owner, so it needs no key derivation and cannot be weak.
  */
-export const IMPORT_KEY_BYTES = 32;
+const IMPORT_KEY_BYTES = 32;
 
 const PREFIX = 'QEX1';
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';

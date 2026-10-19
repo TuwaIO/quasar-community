@@ -21,10 +21,10 @@ export const BTN_SECONDARY =
 // ---------------------------------------------------------------------------
 
 export const CARD_BG = 'bg-[var(--tuwa-bg-secondary)]';
-export const CARD_BORDER = 'border border-[var(--tuwa-border-primary)]';
+const CARD_BORDER = 'border border-[var(--tuwa-border-primary)]';
 export const CARD_BASE = `${CARD_BG} ${CARD_BORDER}`;
 
-export const INNER_BG = 'bg-[var(--tuwa-bg-primary)]';
+const INNER_BG = 'bg-[var(--tuwa-bg-primary)]';
 export const INNER_CARD = `${INNER_BG} ${CARD_BORDER}`;
 
 // ---------------------------------------------------------------------------

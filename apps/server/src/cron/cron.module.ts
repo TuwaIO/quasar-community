@@ -2,9 +2,8 @@ import { BullModule } from '@nestjs/bullmq';
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { makeCounterProvider, makeGaugeProvider } from '@willsoto/nestjs-prometheus';
-import { QueueOptions } from 'bullmq';
 
-import { createBullMQConnection } from '../common/bullmq-connection.factory';
+import { bullRootOptions } from '../common/bullmq-connection.factory';
 import { SecretRotationService } from '../common/secret-rotation.service';
 import { QUEUE_HEALTH_METRIC } from '../constants';
 import { DatabaseModule } from '../database/database.module';
@@ -50,15 +49,7 @@ if (isWorker) {
   imports: [
     BullModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService): QueueOptions => ({
-        connection: createBullMQConnection(configService) as unknown as QueueOptions['connection'],
-        defaultJobOptions: {
-          // Auto-clean completed and failed jobs to prevent Redis memory accumulation.
-          // Per-job overrides will take precedence over these defaults.
-          removeOnComplete: { count: 100, age: 3600 },
-          removeOnFail: { count: 500, age: 86400 },
-        },
-      }),
+      useFactory: bullRootOptions,
       inject: [ConfigService],
     }),
     BullModule.registerQueue(

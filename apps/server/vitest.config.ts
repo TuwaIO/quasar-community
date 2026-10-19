@@ -19,10 +19,6 @@ export default defineConfig({
         inline: ['@tuwaio/shared'],
       },
     },
-    coverage: {
-      provider: 'v8',
-      reporter: ['text', 'json', 'html'],
-    },
   },
   plugins: [
     swc.vite({

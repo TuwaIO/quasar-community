@@ -2,9 +2,8 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module, Provider } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { makeCounterProvider, makeHistogramProvider } from '@willsoto/nestjs-prometheus';
-import { QueueOptions } from 'bullmq';
 
-import { createBullMQConnection } from '../common/bullmq-connection.factory';
+import { bullRootOptions } from '../common/bullmq-connection.factory';
 import { WEBHOOK_DELIVERY_METRIC, WEBHOOK_LATENCY_METRIC } from '../constants';
 import { TrackingModule } from '../tracking/tracking.module';
 import { AmlProcessor, TrackingFastProcessor, TrackingLazyProcessor } from './tracking-worker.service';
@@ -35,15 +34,7 @@ if (isWorker) {
   imports: [
     BullModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService): QueueOptions => ({
-        connection: createBullMQConnection(configService) as unknown as QueueOptions['connection'],
-        defaultJobOptions: {
-          // Auto-clean completed and failed jobs to prevent Redis memory accumulation.
-          // Per-job overrides (e.g. removeOnFail: 1000) will take precedence.
-          removeOnComplete: { count: 100, age: 3600 },
-          removeOnFail: { count: 500, age: 86400 },
-        },
-      }),
+      useFactory: bullRootOptions,
       inject: [ConfigService],
     }),
     BullModule.registerQueue(

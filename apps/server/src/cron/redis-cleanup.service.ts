@@ -12,6 +12,11 @@ import { apps } from '../database/schema';
 import * as schema from '../database/schema/index';
 import { REDIS } from '../redis/redis.module';
 
+/** Jobs removed by one `clean` call: a short Redis script each. */
+const CLEAN_BATCH = 1000;
+/** Jobs removed from one queue in one run at most: a backlog goes over a few hours, never in one long block. */
+const CLEAN_MAX_PER_RUN = 100_000;
+
 @Injectable()
 export class RedisCleanupService {
   private readonly logger = new Logger(RedisCleanupService.name);
@@ -34,6 +39,10 @@ export class RedisCleanupService {
    * Redis memory accumulation between deploys. The global `defaultJobOptions`
    * in BullModule handle new jobs going forward; this cron catches any
    * jobs that slipped through before the policy was applied.
+   *
+   * `clean(grace, limit)` removes at most `limit` jobs, so it runs in batches of {@link CLEAN_BATCH} until a batch
+   * comes back short, up to {@link CLEAN_MAX_PER_RUN} per queue and state: one call of 100 an hour fell behind the
+   * outbox processor (720 jobs an hour) and the Redis shard of `{outbox}` filled up (2026-10-19).
    */
   @Cron(CronExpression.EVERY_HOUR)
   async cleanupBullMQOrphans(): Promise<void> {
@@ -52,17 +61,12 @@ export class RedisCleanupService {
 
     for (const { name, queue } of queues) {
       try {
-        const [completedCleaned, failedCleaned] = await Promise.all([
-          // Remove completed jobs older than 1 hour, keep at most 100
-          queue.clean(3600 * 1000, 100, 'completed'),
-          // Remove failed jobs older than 24 hours, keep at most 500
-          queue.clean(86400 * 1000, 500, 'failed'),
-        ]);
-        const cleaned = completedCleaned.length + failedCleaned.length;
+        // Completed jobs older than an hour, failed ones older than a day
+        const completed = await this.drain(queue, 3600 * 1000, 'completed');
+        const failed = await this.drain(queue, 86400 * 1000, 'failed');
+        const cleaned = completed + failed;
         if (cleaned > 0) {
-          this.logger.log(
-            `[Redis Cleanup] Queue "${name}": removed ${completedCleaned.length} completed, ${failedCleaned.length} failed`,
-          );
+          this.logger.log(`[Redis Cleanup] Queue "${name}": removed ${completed} completed, ${failed} failed`);
           totalCleaned += cleaned;
         }
       } catch (err) {
@@ -72,6 +76,17 @@ export class RedisCleanupService {
     }
 
     this.logger.log(`[Redis Cleanup] Hourly BullMQ cleanup done. Total jobs removed: ${totalCleaned}`);
+  }
+
+  /** Removes the jobs of a state older than `grace`, batch after batch; returns how many. */
+  private async drain(queue: Queue, grace: number, state: 'completed' | 'failed'): Promise<number> {
+    let removed = 0;
+    while (removed < CLEAN_MAX_PER_RUN) {
+      const batch = await queue.clean(grace, Math.min(CLEAN_BATCH, CLEAN_MAX_PER_RUN - removed), state);
+      removed += batch.length;
+      if (batch.length < CLEAN_BATCH) break;
+    }
+    return removed;
   }
 
   /**

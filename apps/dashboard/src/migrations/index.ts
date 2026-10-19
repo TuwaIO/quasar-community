@@ -6,6 +6,7 @@ import * as migration_20261003_212609_webhook_deliveries_cascade from './2026100
 import * as migration_20261014_130000_policies from './20261014_130000_policies';
 import * as migration_20261015_121329_policy_acceptances from './20261015_121329_policy_acceptances';
 import * as migration_20261017_042803_transfer_standard_profile from './20261017_042803_transfer_standard_profile';
+import * as migration_20261019_032713_access_review_reasons from './20261019_032713_access_review_reasons';
 
 export const migrations = [
   {
@@ -47,5 +48,10 @@ export const migrations = [
     up: migration_20261017_042803_transfer_standard_profile.up,
     down: migration_20261017_042803_transfer_standard_profile.down,
     name: '20261017_042803_transfer_standard_profile',
+  },
+  {
+    up: migration_20261019_032713_access_review_reasons.up,
+    down: migration_20261019_032713_access_review_reasons.down,
+    name: '20261019_032713_access_review_reasons',
   },
 ];

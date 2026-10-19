@@ -43,12 +43,38 @@ describe('the review of access', () => {
       'user',
       'method',
       'keyFingerprint',
+      'connection',
       'auto',
       'reason',
+      'work',
       'readData',
     ]);
-    const reason = named(sessions.fields, 'reason') as Field & { options: { value: string }[] };
-    expect(reason.options.map((o) => o.value)).toEqual(['migration', 'restore', 'incident', 'admin_cannot']);
+    const reason = named(sessions.fields, 'reason') as Field & { options: { value: string; label: string }[] };
+    expect(reason.options.map((o) => o.value)).toEqual([
+      'migration',
+      'config',
+      'restore',
+      'incident',
+      'server_update',
+      'checks',
+      'admin_cannot',
+    ]);
+    // Each reason is one of the four the DPA and the transfer assessment name for SSH access to the servers
+    for (const option of reason.options) {
+      expect(option.label).toMatch(/^(Deployment|Backup or restore|Incident|Work the admin panel cannot do)\b/);
+    }
+  });
+
+  it('shows who confirmed and when only once the review is confirmed: saving with the tick fills them', () => {
+    for (const name of ['reviewer', 'reviewerEmail', 'reviewedAt']) {
+      const field = named(AccessReviews.fields, name) as Field & {
+        admin: { condition: (data: object) => boolean; description?: string };
+      };
+      expect(field.admin.condition({ status: 'ready' }), name).toBe(false);
+      expect(field.admin.condition({ status: 'confirmed' }), name).toBe(true);
+    }
+    const confirmed = named(AccessReviews.fields, 'confirmed') as Field & { admin: { description: string } };
+    expect(confirmed.admin.description).toMatch(/save/i);
   });
 });
 
@@ -82,12 +108,24 @@ describe('a change of a review', () => {
         system: false,
         now,
       });
-    expect(() => confirm({ confirmed: true, result: 'All views were mine.' })).toThrow(
-      'Give the reason and the data read of every SSH session before you confirm.',
-    );
-    expect(() =>
-      confirm({ confirmed: true, serverSessions: [{ ...auto, reason: 'migration', readData: 'none' }] }),
-    ).toThrow('Write the result of the review.');
+    // The admin panel marks each field that is missing, and the message names the session
+    const errorsOf = (data: object) => {
+      try {
+        confirm(data);
+      } catch (err) {
+        return {
+          message: (err as Error).message,
+          errors: (err as { data?: { errors?: { path: string }[] } }).data?.errors,
+        };
+      }
+      throw new Error('confirmed');
+    };
+    const unfilled = errorsOf({ confirmed: true, result: 'All views were mine.' });
+    expect(unfilled.errors?.map((e) => e.path)).toEqual(['serverSessions.0.reason', 'serverSessions.0.readData']);
+    expect(unfilled.message).toContain('SSH session 1 (Oct 20, 09:00 UTC, deploy): Reason');
+    expect(
+      errorsOf({ confirmed: true, serverSessions: [{ ...auto, reason: 'migration', readData: 'none' }] }).errors,
+    ).toEqual([expect.objectContaining({ path: 'result' })]);
     expect(
       confirm({
         confirmed: true,
@@ -102,6 +140,25 @@ describe('a change of a review', () => {
       reviewedAt: now.toISOString(),
       serverSessions: [{ id: 's1', user: 'deploy', reason: 'migration', readData: 'none' }],
     });
+  });
+
+  it('needs what was done in a session given as other work the admin panel cannot do, and keeps it', () => {
+    const confirm = (session: object) =>
+      reviewChange({
+        operation: 'update',
+        data: { ...draft, confirmed: true, result: 'One session of mine.', serverSessions: [{ ...auto, ...session }] },
+        original: draft,
+        user: admin,
+        system: false,
+        now,
+      });
+    expect(() => confirm({ reason: 'admin_cannot', readData: 'none' })).toThrow(
+      'SSH session 1 (Oct 20, 09:00 UTC, deploy): What you did',
+    );
+    expect(
+      confirm({ reason: 'admin_cannot', work: 'Rebuilt a Redis index by hand', readData: 'none' }).serverSessions,
+    ).toEqual([expect.objectContaining({ reason: 'admin_cannot', work: 'Rebuilt a Redis index by hand' })]);
+    expect(confirm({ reason: 'config', readData: 'none' })).toMatchObject({ status: 'confirmed' });
   });
 
   it('ends a draft confirmed before its week where the collector stopped', () => {
@@ -147,7 +204,7 @@ describe('a change of a review', () => {
     expect(next.periodFrom).toBe(draft.periodFrom);
     expect(next.findings).toEqual(draft.findings);
     expect(next.serverSessions).toEqual([
-      { ...auto, reason: 'incident', readData: 'none' },
+      { ...auto, reason: 'incident', work: null, readData: 'none' },
       { startedAt: '2026-10-21T08:00:00.000Z', reason: 'restore', readData: 'none', auto: false },
     ]);
     expect(next.status).toBe('ready');
@@ -159,7 +216,7 @@ describe('a change of a review', () => {
       user: admin,
       system: false,
     });
-    expect(dropped.serverSessions).toEqual([{ ...auto, reason: null, readData: null }]);
+    expect(dropped.serverSessions).toEqual([{ ...auto, reason: null, work: null, readData: null }]);
   });
 
   it('records a review by hand at once, and never changes a confirmed review', () => {

@@ -60,7 +60,7 @@ const secretHash = (secret: string | null | undefined) =>
   secret ? createHash('sha256').update(secret).digest('hex') : null;
 
 /** The rule of the endpoint URL field (WebhookEndpoints.ts), so a refused URL is reported instead of failing the import */
-export function endpointUrlProblem(url: string, production: boolean): string | null {
+function endpointUrlProblem(url: string, production: boolean): string | null {
   let parsed: URL;
   try {
     parsed = new URL(url);

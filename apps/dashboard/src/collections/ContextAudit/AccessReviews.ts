@@ -1,6 +1,6 @@
 import { createId } from '@tuwaio/shared/cuid';
 import type { CollectionConfig } from 'payload';
-import { APIError } from 'payload';
+import { APIError, ValidationError } from 'payload';
 
 import { isAdmin } from '@/lib/access';
 
@@ -8,13 +8,30 @@ import { isAdmin } from '@/lib/access';
 export const REVIEW_STATUS = { COLLECTING: 'collecting', READY: 'ready', CONFIRMED: 'confirmed' } as const;
 export type ReviewStatus = (typeof REVIEW_STATUS)[keyof typeof REVIEW_STATUS];
 
-/** The reasons an admin gives for an SSH session. */
+/**
+ * The reasons an admin gives for an SSH session: each one of the four the DPA and the transfer assessment name for SSH
+ * access to the servers (deployments and migrations, backups and restores, incidents, work the admin panel cannot do),
+ * the label saying which. A session for another reason is not authorized.
+ */
 export const SESSION_REASONS = [
-  { value: 'migration', label: 'Deployment or migration' },
+  { value: 'migration', label: 'Deployment or migration: a release, a database migration' },
+  { value: 'config', label: 'Deployment: configuration (.env, secrets, keys)' },
   { value: 'restore', label: 'Backup or restore' },
-  { value: 'incident', label: 'Incident' },
-  { value: 'admin_cannot', label: 'Work the admin panel cannot do' },
+  { value: 'incident', label: 'Incident: an outage, an alert, its investigation' },
+  { value: 'server_update', label: 'Work the admin panel cannot do: server or Docker update, restart' },
+  { value: 'checks', label: 'Work the admin panel cannot do: logs, containers, disk' },
+  { value: 'admin_cannot', label: 'Work the admin panel cannot do: something else (say what)' },
 ] as const;
+
+/** The reason that needs what was done in the session. */
+const OTHER_WORK = 'admin_cannot';
+
+/** `Oct 20, 09:00 UTC`: when a session started, as an error names it. */
+const sessionTime = (iso?: string | null) =>
+  iso
+    ? `${new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}, ` +
+      `${new Date(iso).toISOString().slice(11, 16)} UTC`
+    : 'no time';
 
 /** The context flag of the writes of the collector, which bypass the rules for an admin. */
 export const SYSTEM_CONTEXT = 'accessReviewSystem';
@@ -25,8 +42,10 @@ interface Session {
   user?: string | null;
   method?: string | null;
   keyFingerprint?: string | null;
+  connection?: string | null;
   auto?: boolean | null;
   reason?: string | null;
+  work?: string | null;
   readData?: string | null;
 }
 
@@ -50,11 +69,12 @@ interface Review {
  * - the collector (`req.context[SYSTEM_CONTEXT]`) creates and fills drafts, but never confirms one;
  * - an admin records a review by hand at once, or completes a draft: the reason and the data read of each SSH session,
  *   the result, the confirmation; what the collector gathered and its sessions stay as they were;
- * - confirming needs the result and a reason and the data read for every session, and records who confirmed and when;
+ * - confirming needs the result and a reason and the data read for every session (and what was done, for other work the
+ *   admin panel cannot do), and records who confirmed and when;
  * - a confirmed review never changes.
  *
  * @returns The data to store.
- * @throws APIError 400 or 403 for a change the rules refuse.
+ * @throws APIError 400 or 403 for a change the rules refuse; ValidationError naming each field a confirmation misses.
  */
 export function reviewChange(params: {
   operation: 'create' | 'update';
@@ -87,6 +107,7 @@ export function reviewChange(params: {
     const kept = auto.map((s) => ({
       ...s,
       reason: byId.get(s.id)?.reason ?? s.reason ?? null,
+      work: byId.get(s.id)?.work ?? s.work ?? null,
       readData: byId.get(s.id)?.readData ?? s.readData ?? null,
     }));
     const autoIds = new Set(auto.map((s) => s.id));
@@ -111,11 +132,28 @@ export function reviewChange(params: {
   const confirming = operation === 'create' || data.confirmed === true;
   if (!confirming) return { ...next, status: original?.status ?? REVIEW_STATUS.READY, confirmed: false };
   if (data.confirmed !== true) throw new APIError('Confirm that you reviewed the records of this period.', 400);
-  if (!(data.result ?? original?.result)?.trim()) throw new APIError('Write the result of the review.', 400);
-  const open = sessions.find((s) => !s.reason || !s.readData?.trim());
-  if (open) {
-    throw new APIError('Give the reason and the data read of every SSH session before you confirm.', 400);
+  // Every missing field at once, by its path, so the admin panel marks each one and the message names the session
+  const missing: { path: string; label: string; message: string }[] = [];
+  if (!(data.result ?? original?.result)?.trim()) {
+    missing.push({ path: 'result', label: 'Result', message: 'Write the result of the review.' });
   }
+  sessions.forEach((s, i) => {
+    const name = `SSH session ${i + 1} (${sessionTime(s.startedAt)}, ${s.user || 'unknown user'})`;
+    if (!s.reason) {
+      missing.push({ path: `serverSessions.${i}.reason`, label: `${name}: Reason`, message: 'Choose the reason.' });
+    }
+    if (s.reason === OTHER_WORK && !s.work?.trim()) {
+      missing.push({ path: `serverSessions.${i}.work`, label: `${name}: What you did`, message: 'Say what you did.' });
+    }
+    if (!s.readData?.trim()) {
+      missing.push({
+        path: `serverSessions.${i}.readData`,
+        label: `${name}: Customer data read`,
+        message: 'Write which customer data you read or changed, or "none".',
+      });
+    }
+  });
+  if (missing.length > 0) throw new ValidationError({ errors: missing });
   // A draft confirmed before its week ends covers what the collector gathered so far; the next draft starts there
   const early =
     original?.status === REVIEW_STATUS.COLLECTING &&
@@ -135,6 +173,8 @@ export function reviewChange(params: {
 }
 
 const readOnly = { readOnly: true } as const;
+/** Whether a review is confirmed: who confirmed it and when show only then. */
+const isConfirmed = (data: Partial<Review> | undefined) => data?.status === REVIEW_STATUS.CONFIRMED;
 
 /**
  * The weekly review of the operator's access to customer data. A collector fills a draft for each week: the views in
@@ -237,12 +277,37 @@ export const AccessReviews: CollectionConfig = {
         { name: 'user', type: 'text', admin: readOnly },
         { name: 'method', type: 'text', admin: readOnly },
         { name: 'keyFingerprint', type: 'text', admin: readOnly },
+        // The client address and port of the sign-in as a short hash (`connectionId`): the answer of its sign-in prompt
+        // finds the session by it, and the review keeps no address
+        { name: 'connection', type: 'text', admin: { hidden: true } },
         { name: 'auto', type: 'checkbox', defaultValue: false, admin: { hidden: true } },
-        { name: 'reason', type: 'select', options: [...SESSION_REASONS] },
+        {
+          name: 'reason',
+          type: 'select',
+          options: [...SESSION_REASONS],
+          admin: {
+            description: 'A session filled in advance (a deployment, a sign-in answer) still needs your check.',
+          },
+        },
+        {
+          name: 'work',
+          type: 'textarea',
+          label: 'What you did',
+          admin: {
+            description:
+              'In a few words, e.g. "Changed RESEND_API_KEY in .env and restarted the dashboard", "apt upgrade and ' +
+              'reboot", "Read the engine logs after the Redis alert". Needed for "something else".',
+          },
+        },
         {
           name: 'readData',
           type: 'textarea',
-          admin: { description: 'Which customer data you read or changed in the database, or "none".' },
+          label: 'Customer data read',
+          admin: {
+            description:
+              'Which customer data you read or changed (tables, records and why), or "none" when you did not open the ' +
+              'database or read no customer record.',
+          },
         },
       ],
     },
@@ -255,16 +320,31 @@ export const AccessReviews: CollectionConfig = {
     {
       name: 'result',
       type: 'textarea',
-      admin: { description: 'Who viewed what and why; anything unexplained and what you did about it.' },
+      admin: {
+        description:
+          'Who viewed what and why; anything unexplained and what you did about it. E.g. "All views of customer data ' +
+          'were mine, for support of org X (ticket 12). SSH: 12 automated deployments and 1 .env change, all mine; no ' +
+          'customer data read. Finding: the unknown key was the new deploy key, now listed. Nothing unexplained."',
+      },
     },
-    { name: 'confirmed', type: 'checkbox', label: 'I reviewed the records of this period.' },
-    { name: 'reviewer', type: 'relationship', relationTo: 'users', admin: readOnly },
-    { name: 'reviewerEmail', type: 'text', admin: readOnly },
+    {
+      name: 'confirmed',
+      type: 'checkbox',
+      label: 'I reviewed the records of this period.',
+      admin: {
+        description:
+          'Tick and save: the review is confirmed and can no longer change; your account, your email and the time are ' +
+          'recorded below.',
+      },
+    },
+    // Filled when the review is saved with the confirmation ticked (reviewChange); empty until then, so hidden
+    { name: 'reviewer', type: 'relationship', relationTo: 'users', admin: { ...readOnly, condition: isConfirmed } },
+    { name: 'reviewerEmail', type: 'text', admin: { ...readOnly, condition: isConfirmed } },
     {
       name: 'reviewedAt',
       type: 'date',
       index: true,
-      admin: { ...readOnly, date: { pickerAppearance: 'dayAndTime' } },
+      admin: { ...readOnly, condition: isConfirmed, date: { pickerAppearance: 'dayAndTime' } },
     },
   ],
 };

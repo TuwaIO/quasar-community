@@ -2,6 +2,8 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Queue } from 'bullmq';
 
+import { BULLMQ_DEFAULT_JOB_OPTIONS } from '../common/bullmq-connection.factory';
+
 /** Canonical set of job scheduler IDs managed by this service. */
 const KNOWN_SCHEDULER_IDS = new Set(['unique-outbox-processor-job', 'unique-outbox-cleanup-job']);
 
@@ -14,15 +16,17 @@ export class OutboxInitializerService implements OnApplicationBootstrap {
   async onApplicationBootstrap(): Promise<void> {
     await this.pruneStaleSchedulers();
 
+    // The cleanup of finished jobs goes with the template, not only with the defaults of the queue: the processor
+    // finishes 720 jobs an hour, and kept ones filled the Redis shard of `{outbox}` (2026-10-19)
     await this.outboxQueue.upsertJobScheduler(
       'unique-outbox-processor-job',
       { every: 5000 },
-      { name: 'process-events', data: {} },
+      { name: 'process-events', data: {}, opts: BULLMQ_DEFAULT_JOB_OPTIONS },
     );
     await this.outboxQueue.upsertJobScheduler(
       'unique-outbox-cleanup-job',
       { pattern: '0 0 * * *' },
-      { name: 'cleanup-events', data: {} },
+      { name: 'cleanup-events', data: {}, opts: BULLMQ_DEFAULT_JOB_OPTIONS },
     );
   }
 

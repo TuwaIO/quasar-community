@@ -730,10 +730,18 @@ export interface AccessReview {
         user?: string | null;
         method?: string | null;
         keyFingerprint?: string | null;
+        connection?: string | null;
         auto?: boolean | null;
-        reason?: ('migration' | 'restore' | 'incident' | 'admin_cannot') | null;
         /**
-         * Which customer data you read or changed in the database, or "none".
+         * A session filled in advance (a deployment, a sign-in answer) still needs your check.
+         */
+        reason?: ('migration' | 'config' | 'restore' | 'incident' | 'server_update' | 'checks' | 'admin_cannot') | null;
+        /**
+         * In a few words, e.g. "Changed RESEND_API_KEY in .env and restarted the dashboard", "apt upgrade and reboot", "Read the engine logs after the Redis alert". Needed for "something else".
+         */
+        work?: string | null;
+        /**
+         * Which customer data you read or changed (tables, records and why), or "none" when you did not open the database or read no customer record.
          */
         readData?: string | null;
         id?: string | null;
@@ -753,9 +761,12 @@ export interface AccessReview {
     | null;
   collectedUntil?: string | null;
   /**
-   * Who viewed what and why; anything unexplained and what you did about it.
+   * Who viewed what and why; anything unexplained and what you did about it. E.g. "All views of customer data were mine, for support of org X (ticket 12). SSH: 12 automated deployments and 1 .env change, all mine; no customer data read. Finding: the unknown key was the new deploy key, now listed. Nothing unexplained."
    */
   result?: string | null;
+  /**
+   * Tick and save: the review is confirmed and can no longer change; your account, your email and the time are recorded below.
+   */
   confirmed?: boolean | null;
   reviewer?: (string | null) | User;
   reviewerEmail?: string | null;
@@ -1275,8 +1286,10 @@ export interface AccessReviewsSelect<T extends boolean = true> {
         user?: T;
         method?: T;
         keyFingerprint?: T;
+        connection?: T;
         auto?: T;
         reason?: T;
+        work?: T;
         readData?: T;
         id?: T;
       };

@@ -13,7 +13,6 @@ vi.mock('@/payload.config', () => ({
 }));
 
 vi.mock('@/lib/organizations', () => ({
-  getUserOrgIds: vi.fn(),
   requireOrgRole: mockRequireOrgRole,
 }));
 

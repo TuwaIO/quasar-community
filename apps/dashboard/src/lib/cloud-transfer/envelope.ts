@@ -14,10 +14,10 @@ import { CloudTransferError } from './errors';
  * flag, so a changed, reordered, dropped or cut frame fails authentication or the final-frame check.
  */
 
-export const EXPORT_FORMAT = 'quasar-export';
+const EXPORT_FORMAT = 'quasar-export';
 /** Highest format version this node writes and reads */
-export const EXPORT_VERSION = 1;
-export const DEFAULT_CHUNK_SIZE = 64 * 1024;
+const EXPORT_VERSION = 1;
+const DEFAULT_CHUNK_SIZE = 64 * 1024;
 
 const MAGIC = Buffer.from('QEX1\n');
 const MAX_HEADER_BYTES = 4096;

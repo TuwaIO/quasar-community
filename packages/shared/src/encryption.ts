@@ -54,8 +54,9 @@ export function encrypt(text: string | null | undefined): string {
 
 /**
  * Decrypts a string formatted as: qenc:iv:authTag:encryptedContent
- * If the string is not encrypted (does not have the prefix) or decryption fails,
- * it returns the original string.
+ * A string without the prefix is returned as it is (not encrypted).
+ * @throws {Error} `Decryption failed: …` when a prefixed value cannot be decrypted (wrong structure, key or auth tag):
+ * it never returns the cipher text in place of the plaintext.
  */
 export function decrypt(encryptedText: string | null | undefined): string {
   if (!encryptedText || typeof encryptedText !== 'string' || !encryptedText.startsWith(PREFIX)) {
