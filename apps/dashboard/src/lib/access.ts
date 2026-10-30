@@ -1,4 +1,5 @@
-import type { Access, FieldAccess } from 'payload';
+import type { Access, CollectionBeforeChangeHook, FieldAccess } from 'payload';
+import { APIError } from 'payload';
 
 export const isAdmin: Access = ({ req: { user } }) => {
   // Safe check for admin role
@@ -8,6 +9,35 @@ export const isAdmin: Access = ({ req: { user } }) => {
 export const isAdminFieldLevel: FieldAccess = ({ req: { user } }) => {
   return Boolean(user?.roles?.includes('admin'));
 };
+
+/** Field access for the fields that say whose a row is: written on create, never on an update. */
+export const neverOnUpdate: FieldAccess = () => false;
+
+const relationId = (value: unknown): string | null | undefined =>
+  typeof value === 'object' && value !== null ? String((value as { id: unknown }).id) : (value as string | null);
+
+/**
+ * A `beforeChange` hook that refuses an update moving a row to another owner (an organization, an account, an app).
+ * Payload applies the where-query of an access function to the stored row, never to the data an update writes, so an
+ * organization-scoped update once moved a membership with its role into any organization (security report
+ * 2026-10-30). The field access {@link neverOnUpdate} strips these fields for REST callers; this hook also holds for
+ * the Local API with `overrideAccess`, where field access is skipped.
+ *
+ * @param fields - The relationship fields that must keep the value they were created with.
+ * @returns The hook; it throws a 403 `APIError` when an update changes one of the fields.
+ */
+export const keepOwnerFields =
+  (fields: string[]): CollectionBeforeChangeHook =>
+  ({ data, operation, originalDoc }) => {
+    if (operation !== 'update' || !originalDoc || !data) return data;
+    for (const field of fields) {
+      if (!(field in data) || data[field] === undefined) continue;
+      if (relationId(data[field]) !== relationId(originalDoc[field])) {
+        throw new APIError(`The ${field} of this record cannot be changed.`, 403);
+      }
+    }
+    return data;
+  };
 
 export const isAuthenticated: Access = ({ req: { user } }) => {
   return Boolean(user);

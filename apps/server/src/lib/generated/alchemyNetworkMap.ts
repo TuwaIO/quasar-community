@@ -32,7 +32,6 @@ export const alchemyNetworkMap: Record<number | string, string> = {
   999: "hyperliquid-mainnet",
   1001: "kaia-testnet",
   1088: "metis-mainnet",
-  1284: "moonbeam-mainnet",
   1301: "unichain-sepolia",
   1315: "story-aeneid",
   1328: "sei-testnet",

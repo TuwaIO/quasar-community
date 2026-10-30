@@ -3,6 +3,7 @@ import { maskKey } from '@tuwaio/shared/utils';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
+import { WEBHOOK_APP_POPULATE } from '@/collections/ContextWebhooks/WebhookEndpoints';
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccess } from '@/lib/auth-utils';
 import { formatWebhookError, isLocalhostUrl } from '@/lib/webhook-utils';
@@ -36,6 +37,7 @@ export const GET = withRateLimit(
         collection: 'webhook-endpoints',
         id: webhookId,
         depth: 1,
+        populate: WEBHOOK_APP_POPULATE,
         overrideAccess: true,
       });
 
@@ -143,6 +145,8 @@ export const PATCH = withRateLimit(
         collection: 'webhook-endpoints',
         id: webhookId,
         data: validation.data as WebhookEndpoint,
+        depth: 1,
+        populate: WEBHOOK_APP_POPULATE,
         overrideAccess: true,
       });
 

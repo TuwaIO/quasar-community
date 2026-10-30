@@ -1,12 +1,12 @@
 import { createId } from '@tuwaio/shared/cuid';
 import type { CollectionConfig } from 'payload';
 
-import { isMemberOfOrganization, isOrgOwner } from '@/lib/access';
+import { isAdmin, isMemberOfOrganization } from '@/lib/access';
 
 /**
  * Per-App accepted payment methods.
  * Tenant-isolated: every record scoped to an organization.
- * Write access restricted to org owners only.
+ * Write access through REST: system admins only.
  *
  * Part of the Payments App, which is dormant in every edition — see the
  * `create` note below.
@@ -34,11 +34,11 @@ export const AppAcceptedPayments: CollectionConfig = {
     // against. Until that ships, the safe number of ways to declare one is
     // zero.
     //
-    // `update`/`delete` deliberately stay open to org owners: a record created
-    // before this gate closed must remain correctable and removable.
+    // A record created before this gate closed stays correctable and removable by system admins in the admin
+    // panel: Payload's access cannot narrow the app an update moves a method to, so REST writes are theirs only.
     create: () => false,
-    update: isOrgOwner,
-    delete: isOrgOwner,
+    update: isAdmin,
+    delete: isAdmin,
   },
   fields: [
     {

@@ -9,13 +9,7 @@ import {
   COMMUNITY_WORKSPACE_RPS_LIMIT,
 } from '@/constants/community';
 import { EDITION } from '@/constants/edition';
-import {
-  isAdminFieldLevel,
-  isAuthenticated,
-  isOrgAdminOrOwnerForOrg,
-  isOrgMemberOrAdmin,
-  isOrgOwnerForOrg,
-} from '@/lib/access';
+import { isAdmin, isAdminFieldLevel, isOrgMemberOrAdmin } from '@/lib/access';
 import { redisApi } from '@/lib/redis';
 import type { User } from '@/payload-types';
 
@@ -37,9 +31,11 @@ export const Organizations: CollectionConfig = {
   },
   access: {
     read: isOrgMemberOrAdmin,
-    create: isAuthenticated,
-    update: isOrgAdminOrOwnerForOrg,
-    delete: isOrgOwnerForOrg,
+    // Written through the dashboard's routes; Payload's REST writes are for system admins: an organization-scoped
+    // access function never constrains the organization a create or an update writes (lib/access.ts)
+    create: isAdmin,
+    update: isAdmin,
+    delete: isAdmin,
   },
   hooks: {
     beforeValidate: [

@@ -12,7 +12,7 @@ const generateSigningSecret = (): string => {
   return `whsec_${buffer.toString('hex')}`;
 };
 
-import { isAdminFieldLevel, isAppOrgAdminOrOwner, isMemberOfAppOrganization } from '@/lib/access';
+import { isAdmin, isAdminFieldLevel, isMemberOfAppOrganization, keepOwnerFields, neverOnUpdate } from '@/lib/access';
 import { recordDataAccess } from '@/lib/dataAccess';
 import { isLocalhostUrl } from '@/lib/webhook-utils';
 
@@ -23,6 +23,21 @@ import { isLocalhostUrl } from '@/lib/webhook-utils';
  * when subscribed events occur. Each endpoint is scoped to a specific API key
  * (project/tenant) and carries an HMAC signing secret for payload verification.
  */
+/**
+ * The app of an endpoint as the webhook routes send it to the dashboard: its name, kind and environment, and its
+ * organization for the access check. Its keys, RPC settings and provider keys stay on the server, as for transactions
+ * (TRANSACTION_LINKS_POPULATE); any member of the organization reads webhooks.
+ */
+export const WEBHOOK_APP_POPULATE = {
+  apps: { name: true, kind: true, environment: true, organization: true },
+} as const;
+
+/** A delivery's endpoint (its address and app, never its signing secret) and that app, as above. */
+export const WEBHOOK_DELIVERY_POPULATE = {
+  'webhook-endpoints': { url: true, description: true, app: true, isActive: true },
+  ...WEBHOOK_APP_POPULATE,
+} as const;
+
 export const WebhookEndpoints: CollectionConfig = {
   slug: 'webhook-endpoints',
   disableDuplicate: true,
@@ -38,9 +53,11 @@ export const WebhookEndpoints: CollectionConfig = {
   },
   access: {
     read: isMemberOfAppOrganization,
-    create: isAppOrgAdminOrOwner,
-    update: isAppOrgAdminOrOwner,
-    delete: isAppOrgAdminOrOwner,
+    // Written through the dashboard's routes; Payload's REST writes are for system admins: an organization-scoped
+    // access function never constrains the organization a create or an update writes (lib/access.ts)
+    create: isAdmin,
+    update: isAdmin,
+    delete: isAdmin,
   },
   fields: [
     // First field on purpose: the switch an operator reaches for when an
@@ -69,6 +86,8 @@ export const WebhookEndpoints: CollectionConfig = {
       required: true,
       hasMany: false,
       index: true,
+      // An endpoint never moves to another app
+      access: { update: neverOnUpdate },
       admin: {
         description: 'The App (tenant environment) this webhook endpoint belongs to.',
       },
@@ -105,6 +124,9 @@ export const WebhookEndpoints: CollectionConfig = {
     {
       name: 'signingSecret',
       type: 'text',
+      // Encrypted at rest; members see it after a step-up through the dashboard's routes, never as a ciphertext through
+      // Payload's REST API (security review 2026-10-30)
+      access: { read: isAdminFieldLevel },
       required: true,
       unique: true,
       label: 'Signing Secret',
@@ -266,6 +288,7 @@ export const WebhookEndpoints: CollectionConfig = {
 
         return data;
       },
+      keepOwnerFields(['app']),
     ],
     // No beforeDelete: the foreign key of `webhook_deliveries.endpoint_id`
     // cascades (migration 20261003_212609_webhook_deliveries_cascade), so the

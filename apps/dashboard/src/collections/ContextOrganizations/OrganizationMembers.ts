@@ -1,7 +1,7 @@
 import { createId } from '@tuwaio/shared/cuid';
 import type { CollectionConfig } from 'payload';
 
-import { isMemberOfOrganization } from '@/lib/access';
+import { isMemberOfOrganization, keepOwnerFields, neverOnUpdate } from '@/lib/access';
 import type { Organization, User } from '@/payload-types';
 
 import { ORG_MEMBER_DELETION_COOLDOWN_HOURS } from '../../../constants';
@@ -53,6 +53,9 @@ export const OrganizationMembers: CollectionConfig = {
       relationTo: 'organizations',
       required: true,
       index: true,
+      // A membership never moves to another organization (nor to another account, below): role changes go through
+      // the dashboard's member routes, which check the requester's role
+      access: { update: neverOnUpdate },
       admin: {
         readOnly: true,
       },
@@ -63,6 +66,7 @@ export const OrganizationMembers: CollectionConfig = {
       relationTo: 'users',
       required: true,
       index: true,
+      access: { update: neverOnUpdate },
       admin: {
         readOnly: true,
       },
@@ -129,6 +133,7 @@ export const OrganizationMembers: CollectionConfig = {
   ],
   hooks: {
     beforeChange: [
+      keepOwnerFields(['organization', 'user']),
       async ({ data, req, operation }) => {
         if (operation === 'create') {
           const organizationId = data.organization;

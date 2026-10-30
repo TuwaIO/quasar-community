@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { WEBHOOK_DELIVERY_POPULATE } from '@/collections/ContextWebhooks/WebhookEndpoints';
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccess } from '@/lib/auth-utils';
 import { parsePagination } from '@/lib/pagination';
@@ -45,7 +46,9 @@ export const GET = withRateLimit(async (req: Request, { params }: { params: Prom
       limit,
       page,
       sort: '-createdAt',
-      depth: 2, // depth 2 to see endpoint.app info
+      // Depth 2 for the endpoint's app; only what the delivery history shows (WEBHOOK_DELIVERY_POPULATE)
+      depth: 2,
+      populate: WEBHOOK_DELIVERY_POPULATE,
       overrideAccess: true,
     });
 

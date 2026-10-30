@@ -144,33 +144,8 @@ async function resolveAuthContext(req: PayloadRequest): Promise<ProxyMetadata> {
   };
 }
 
-// ---------------------------------------------------------------------------
-// 3. Strict Sync Access (Machine-Only Updates)
-// ---------------------------------------------------------------------------
-
 /**
- * STRICT Access Control:
- * Updates are ONLY allowed via the Sync API (Pulsar Client with a valid Key).
- * Manual updates via Admin Dashboard are FORBIDDEN to ensure data integrity.
- */
-const machineOnlySyncAccess = async ({ req }: { req: PayloadRequest; id?: string | number }): Promise<boolean> => {
-  // ⛔️ BLOCK ADMIN MANUAL EDITS
-  // We explicitly DO NOT check isAdmin(req) here.
-  // If the request comes from the Dashboard (cookie auth), resolveAuthContext will fail/throw, returning false.
-
-  try {
-    const ctx = await resolveAuthContext(req);
-    return ctx.scopes.includes('history:read');
-    // eslint-disable-next-line
-  } catch (e) {
-    // If no API/Proxy context is found (e.g. Admin in Dashboard), Access Denied.
-    return false;
-  }
-};
-
-/**
- * STRICT Access Control for creation — same shape as machineOnlySyncAccess,
- * one scope up.
+ * STRICT Access Control for creation: the API context of an app with the `sync:write` scope.
  *
  * A transaction row is an *observation* of something that happened on a chain:
  * the engine writes it from the Pulsar sync path, keyed by a real txKey, and
@@ -441,7 +416,10 @@ export const Transactions: CollectionConfig = {
     },
   },
   access: {
-    read: () => true, // Access gated by beforeOperation hook
+    // Through Payload's REST API, system admins only: findByID, updateByID and count ignore the `where` the
+    // beforeOperation hook adds, so the hook's owner filter never held there (any signed-in user read any row by its
+    // id). The dashboard reads through its routes (Local API), where the hook still filters by owner
+    read: isAdmin,
 
     // 🔥 STRICT CREATE ACCESS:
     // Machine (Pulsar sync) context only. The beforeOperation hook below still
@@ -449,10 +427,10 @@ export const Transactions: CollectionConfig = {
     // what stops a Dashboard admin from reaching the operation at all.
     create: machineOnlyCreateAccess,
 
-    // 🔥 STRICT UPDATE ACCESS:
-    // Only requests with valid API Context (Pulsar Client) can update.
-    // Admin Dashboard requests will FAIL here.
-    update: machineOnlySyncAccess,
+    // 🔥 NO UPDATE THROUGH REST:
+    // The engine writes over Drizzle and the dashboard over the Local API. A REST update with an API key passed
+    // machineOnlySyncAccess, and updateByID ignores the hook's owner filter: any app key rewrote any tenant's row
+    update: () => false,
 
     // 🔥 NO MANUAL DELETE:
     // Closed to everyone, admins included. A transaction row is the record of
@@ -473,6 +451,9 @@ export const Transactions: CollectionConfig = {
         // --- READ ---
         if (operation === 'read') {
           if (isAdmin({ req })) return args;
+
+          // Anyone else through REST is refused by `access.read` right after this hook
+          if (req.payloadAPI === 'REST') return args;
 
           // Internal server-side Local API calls (e.g. idempotency check)
           if (req.context?.skipOwnerFilter) return args;

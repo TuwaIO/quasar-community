@@ -3,6 +3,7 @@ import { maskKey } from '@tuwaio/shared/utils';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
+import { WEBHOOK_APP_POPULATE } from '@/collections/ContextWebhooks/WebhookEndpoints';
 import { withRateLimit } from '@/lib/apiWrapper';
 import { authenticateRequest, verifyOrgAccess } from '@/lib/auth-utils';
 import { parsePagination } from '@/lib/pagination';
@@ -56,6 +57,7 @@ export const GET = withRateLimit(async (req: Request, { params }: { params: Prom
       page,
       sort: '-createdAt',
       depth: 1,
+      populate: WEBHOOK_APP_POPULATE,
       overrideAccess: true,
     });
 

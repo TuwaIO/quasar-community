@@ -7,6 +7,14 @@ import { authenticateRequest, verifyOrgAccess } from '@/lib/auth-utils';
 import { parsePagination } from '@/lib/pagination';
 import type { OrganizationMember, User } from '@/payload-types';
 
+/** A member as the Team page shows them: the membership, and the name and email of the user. */
+const memberView = (mem: OrganizationMember, u: Pick<User, 'id' | 'name' | 'email'>) => ({
+  id: mem.id,
+  role: mem.role,
+  user: { id: u.id, name: u.name, email: u.email },
+  joinedAt: mem.createdAt,
+});
+
 const AddMemberSchema = z.object({
   email: z.string().email(),
   role: z.enum(['admin', 'member']).default('member'),
@@ -57,16 +65,7 @@ export const GET = withRateLimit(async (req: Request, { params }: { params: Prom
         };
       }
 
-      return {
-        id: mem.id,
-        role: mem.role,
-        user: {
-          id: u.id,
-          name: u.name,
-          email: u.email,
-        },
-        joinedAt: mem.createdAt,
-      };
+      return memberView(mem, u);
     });
 
     return NextResponse.json({
@@ -107,26 +106,33 @@ export const POST = withRateLimit(async (req: Request, { params }: { params: Pro
       collection: 'users',
       where: { email: { equals: email } },
       limit: 1,
+      depth: 0,
+      select: { name: true, email: true },
     });
 
     if (targetUser.totalDocs === 0) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const targetUserId = targetUser.docs[0].id;
+    const target = targetUser.docs[0] as Pick<User, 'id' | 'name' | 'email'>;
 
-    // Create Membership (Hooks handle duplication check & email)
+    // Create Membership (Hooks handle duplication check & email). Not populated: the answer carries only what the
+    // Team page shows, never the user's record (2FA, sessions, roles)
     const newMember = await payload.create({
       collection: 'organization-members',
       data: {
         organization: orgId,
-        user: targetUserId,
+        user: target.id,
         role: newRole,
       },
+      depth: 0,
       req: req as unknown as PayloadRequest,
     });
 
-    return NextResponse.json({ success: true, member: newMember }, { status: 201 });
+    return NextResponse.json(
+      { success: true, member: memberView(newMember as unknown as OrganizationMember, target) },
+      { status: 201 },
+    );
   } catch (error: any) {
     console.error('[Add Member] Error:', error);
     if (error.message && error.message.includes('already a member')) {

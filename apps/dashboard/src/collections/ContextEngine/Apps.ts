@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import type { CollectionConfig } from 'payload';
 import { APIError } from 'payload';
 
-import { isMemberOfOrganization, isOrgAdminOrOwner } from '@/lib/access';
+import { isAdmin, isAdminFieldLevel, isMemberOfOrganization, keepOwnerFields, neverOnUpdate } from '@/lib/access';
 import { recordDataAccess } from '@/lib/dataAccess';
 import { redisApi } from '@/lib/redis';
 import type { App } from '@/payload-types';
@@ -40,9 +40,11 @@ export const Apps: CollectionConfig = {
   },
   access: {
     read: isMemberOfOrganization,
-    create: isOrgAdminOrOwner,
-    update: isOrgAdminOrOwner,
-    delete: isOrgAdminOrOwner,
+    // Written through the dashboard's routes; Payload's REST writes are for system admins: an organization-scoped
+    // access function never constrains the organization a create or an update writes (lib/access.ts)
+    create: isAdmin,
+    update: isAdmin,
+    delete: isAdmin,
   },
   fields: [
     // First field on purpose: it is the master switch for the whole app, and
@@ -79,6 +81,8 @@ export const Apps: CollectionConfig = {
       relationTo: 'organizations',
       required: true,
       index: true,
+      // An app never moves to another organization
+      access: { update: neverOnUpdate },
     },
     {
       name: 'environment',
@@ -133,6 +137,9 @@ export const Apps: CollectionConfig = {
     {
       name: 'secretKey',
       type: 'text',
+      // Encrypted at rest; members see it masked or after a step-up through the dashboard's routes, never as a
+      // ciphertext through Payload's REST API (security review 2026-10-30)
+      access: { read: isAdminFieldLevel },
       unique: true,
       index: true,
       label: 'Secret Key',
@@ -199,6 +206,8 @@ export const Apps: CollectionConfig = {
         {
           name: 'rpcUrl',
           type: 'text',
+          // May carry a provider key: never sent to members through REST (security review 2026-10-30)
+          access: { read: isAdminFieldLevel },
           required: true,
         },
       ],
@@ -206,6 +215,9 @@ export const Apps: CollectionConfig = {
     {
       name: 'alchemyApiKey',
       type: 'text',
+      // Encrypted at rest; members see it masked or after a step-up through the dashboard's routes, never as a
+      // ciphertext through Payload's REST API (security review 2026-10-30)
+      access: { read: isAdminFieldLevel },
       label: 'Alchemy API Key',
       admin: {
         description: 'Optional. Bring your own Alchemy key for this specific app.',
@@ -220,6 +232,9 @@ export const Apps: CollectionConfig = {
     {
       name: 'quickNodeApiKey',
       type: 'text',
+      // Encrypted at rest; members see it masked or after a step-up through the dashboard's routes, never as a
+      // ciphertext through Payload's REST API (security review 2026-10-30)
+      access: { read: isAdminFieldLevel },
       label: 'QuickNode API Key',
       admin: {
         description:
@@ -266,6 +281,9 @@ export const Apps: CollectionConfig = {
     {
       name: 'gelatoApiKey',
       type: 'text',
+      // Encrypted at rest; members see it masked or after a step-up through the dashboard's routes, never as a
+      // ciphertext through Payload's REST API (security review 2026-10-30)
+      access: { read: isAdminFieldLevel },
       label: 'Gelato API Key (System)',
       admin: {
         description: 'Optional. Used for Gelato relay tracking.',
@@ -280,6 +298,9 @@ export const Apps: CollectionConfig = {
     {
       name: 'pimlicoApiKey',
       type: 'text',
+      // Encrypted at rest; members see it masked or after a step-up through the dashboard's routes, never as a
+      // ciphertext through Payload's REST API (security review 2026-10-30)
+      access: { read: isAdminFieldLevel },
       label: 'Pimlico API Key',
       admin: {
         description: 'Optional. Used for Pimlico ERC-4337 bundler and paymaster tracking.',
@@ -312,6 +333,8 @@ export const Apps: CollectionConfig = {
         {
           name: 'goPlusApiKey',
           type: 'text',
+          // Encrypted at rest: never sent to members as a ciphertext through REST (security review 2026-10-30)
+          access: { read: isAdminFieldLevel },
           label: 'GoPlus API Key (User)',
           admin: {
             condition: (data) => data?.paymentSettings?.amlEnabled === true,
@@ -327,6 +350,8 @@ export const Apps: CollectionConfig = {
         {
           name: 'goPlusApiSecret',
           type: 'text',
+          // Encrypted at rest: never sent to members as a ciphertext through REST (security review 2026-10-30)
+          access: { read: isAdminFieldLevel },
           label: 'GoPlus API Secret (User)',
           admin: {
             condition: (data) => data?.paymentSettings?.amlEnabled === true,
@@ -465,6 +490,7 @@ export const Apps: CollectionConfig = {
 
         return data;
       },
+      keepOwnerFields(['organization']),
     ],
     afterRead: [
       async ({ doc }) => {
